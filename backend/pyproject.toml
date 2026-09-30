@@ -1,0 +1,28 @@
+[project]
+name = "opus"
+version = "0.1.0"
+description = "Unified download engine — one API over usenet, torrent, soulseek, streaming and web"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    # the engine interfaces OPUS serves push their updates over a websocket,
+    # and slskd's configuration is YAML
+    "websockets",
+    "pyyaml",
+    "sqlalchemy[asyncio]>=2.0",
+    "psycopg[binary]",
+    "alembic",
+    "httpx",
+    "pydantic-settings",
+    "yt-dlp[default]",
+]
+
+[tool.setuptools]
+packages = ["opus"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="hr">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<link rel="icon" href="/favicon.svg?v=demo" />
+		<meta name="theme-color" content="#0e1213" />
+		<meta name="robots" content="noindex" />
+		<title>OPUS · Downloads demo</title>
+		<script>
+			try {
+				var t = localStorage.getItem('theme');
+				if (t === 'dark' || !t || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches))
+					document.documentElement.classList.add('dark');
+			} catch (e) { document.documentElement.classList.add('dark'); }
+		</script>
+		<script src="/demo-net.js"></script>
+		%sveltekit.head%
+	</head>
+	<body data-sveltekit-preload-data="hover"><div style="display: contents">%sveltekit.body%</div></body>
+</html>

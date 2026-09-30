@@ -1,0 +1,8 @@
+# OPUS · Downloads deployment inventory. Copy this file to deploy/hosts.conf
+# (git-ignored) and list your own instances there. One line per instance:
+#   <name> <ssh-host> <lxc-id> <path-on-proxmox-host> <path-in-lxc>
+#
+# deploy/prod.sh <name> ships the pushed HEAD of this checkout (git archive) to
+# the Proxmox host and brings the stack up inside the LXC, which sees
+# <path-on-proxmox-host> at <path-in-lxc> through a bind mount.
+prod root@192.0.2.10 103 /srv/opus/opus-downloads /srv/opus-downloads

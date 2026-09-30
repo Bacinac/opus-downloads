@@ -1,0 +1,238 @@
+# The service containers carry the module in their name because Library runs on
+# the same box. The ENGINE containers deliberately do not: `opus_prowlarr` is not
+# a service of this module, it is an engine OPUS runs, and renaming those would
+# orphan every running one — including the two tunnels — for no gain.
+name: opus-downloads
+
+# Docker's default json-file driver has no ceiling, and this box also holds the
+# music, the films and the download landing zone — a log is the last thing that
+# should be what fills it. Applied to every service by anchor so a new one
+# cannot be added without one.
+x-log: &log
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+x-backend-env: &backend-env
+  # dev opts into auto-reload via .env; production runs the baked code plain
+  OPUS_DEV_RELOAD: ${OPUS_DEV_RELOAD:-0}
+  OPUS_DATABASE_URL: postgresql+psycopg://opus:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/opus
+  # The configured non-root UID has no image-owned home directory. Keep
+  # transient caches away from the source and persistent data mounts.
+  HOME: /tmp
+
+# One image for the three backend services. What the installation's plugins
+# (opus_core/plugins.py) need is installed from the directory OPUS_PLUGINS names,
+# and that directory is mounted over what the image baked, like the code.
+x-backend-build: &backend-build
+  context: ./backend
+  additional_contexts:
+    plugins: ${OPUS_PLUGINS:-./plugins}
+
+services:
+  backend:
+    build: *backend-build
+    image: opus/downloads-backend
+    container_name: opus_downloads_backend
+    logging: *log
+    # Owns only landing/config data. Docker control is delegated to the
+    # controller below, so this web-facing service needs no root privileges.
+    user: "${OPUS_APP_UID:-1000}:${OPUS_APP_GID:-1000}"
+    env_file: .env
+    environment:
+      <<: *backend-env
+      # the same trees as the Docker host sees them, so the containers OPUS
+      # creates bind the real directories and not empty look-alikes
+      OPUS_ENGINES_HOST_DIR: ${OPUS_ENGINES_HOST_DIR:-/mnt/docker/opus-downloads/volumes/engines}
+      OPUS_LANDING_HOST_DIR: ${OPUS_LANDING_HOST_DIR:-${OPUS_LANDING_DEVICE:-/mnt/docker/opus-downloads/volumes/landing}}
+    ports:
+      - "8097:8097"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8097/api/ping', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${OPUS_BACKEND_MEMORY_LIMIT:-2g}
+    pids_limit: ${OPUS_BACKEND_PIDS_LIMIT:-512}
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./backend:/app:ro
+      - ${OPUS_PLUGINS:-./plugins}:/plugins:ro
+      - landing:/landing
+      # bundled mode is driven from the UI, so the backend creates the engine
+      # configuration itself. Docker control is isolated in docker-controller.
+      - ./volumes/engines:/engines
+    networks:
+      - default
+      - engines
+      - docker-controller
+    depends_on:
+      postgres:
+        condition: service_healthy
+      docker-controller:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # The only service holding Docker's root-equivalent socket. It exposes no
+  # host port; the backend can reach it only across the internal network, and
+  # this process validates the narrow OPUS engine contract before forwarding.
+  docker-controller:
+    build: *backend-build
+    image: opus/downloads-backend
+    container_name: opus_downloads_docker_controller
+    # The controller needs the socket's group, never a root UID. Its API is
+    # still constrained by docker_controller.py because socket membership is
+    # root-equivalent on the Docker host.
+    user: "${OPUS_APP_UID:-1000}:${OPUS_APP_GID:-1000}"
+    group_add:
+      - "${OPUS_DOCKER_GID:-991}"
+    command: ["./entrypoint.sh", "docker-controller"]
+    logging: *log
+    env_file: .env
+    environment:
+      <<: *backend-env
+      OPUS_ENGINES_HOST_DIR: ${OPUS_ENGINES_HOST_DIR:-/mnt/docker/opus-downloads/volumes/engines}
+      OPUS_LANDING_HOST_DIR: ${OPUS_LANDING_HOST_DIR:-${OPUS_LANDING_DEVICE:-/mnt/docker/opus-downloads/volumes/landing}}
+      OPUS_MEDIA_HOST_DIR: ${OPUS_MEDIA_HOST_DIR:-}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${OPUS_CONTROLLER_MEMORY_LIMIT:-512m}
+    pids_limit: ${OPUS_CONTROLLER_PIDS_LIMIT:-128}
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:2376/api/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - ./backend:/app:ro
+      - ${OPUS_PLUGINS:-./plugins}:/plugins:ro
+      - ${OPUS_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    networks:
+      - docker-controller
+    restart: unless-stopped
+
+  # the bundled engines' own interfaces, on an origin of their own (OPUS_ENGINES_URL)
+  engine-ui:
+    build: *backend-build
+    image: opus/downloads-backend
+    container_name: opus_downloads_engine_ui
+    user: "${OPUS_APP_UID:-1000}:${OPUS_APP_GID:-1000}"
+    command: ["./entrypoint.sh", "engine-ui"]
+    logging: *log
+    env_file: .env
+    environment: *backend-env
+    ports:
+      - "8099:8099"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${OPUS_ENGINE_UI_MEMORY_LIMIT:-512m}
+    pids_limit: ${OPUS_ENGINE_UI_PIDS_LIMIT:-128}
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./backend:/app:ro
+      - ${OPUS_PLUGINS:-./plugins}:/plugins:ro
+    networks:
+      - default
+      - engines
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    # OPUS_UI_TARGET=prod (default) → vite build (adapter-node) served by
+    # the package server.mjs with the /api proxy; =dev → Vite dev server + HMR off the bind
+    # mounts below (which are inert in prod: server.mjs serves the baked build).
+    build:
+      context: ./frontend
+      target: ${OPUS_UI_TARGET:-prod}
+      args:
+        VITE_OPUS_LIBRARY_URL: ${VITE_OPUS_LIBRARY_URL:-}
+        VITE_OPUS_PLAYER_URL: ${VITE_OPUS_PLAYER_URL:-}
+    image: opus/downloads-ui:${OPUS_UI_TARGET:-prod}
+    container_name: opus_downloads_frontend
+    logging: *log
+    environment:
+      OPUS_DEV_HOST: ${OPUS_DEV_HOST:-}
+      OPUS_API_URL: http://backend:8097
+      OPUS_TRUSTED_PROXIES: ${OPUS_TRUSTED_PROXIES:-}
+      # the dev server reads them at runtime; the prod build takes them as args
+      VITE_OPUS_LIBRARY_URL: ${VITE_OPUS_LIBRARY_URL:-}
+      VITE_OPUS_PLAYER_URL: ${VITE_OPUS_PLAYER_URL:-}
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/static:/app/static
+      - ./frontend/svelte.config.js:/app/svelte.config.js
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+    ports:
+      - "5282:5173"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${OPUS_FRONTEND_MEMORY_LIMIT:-512m}
+    pids_limit: ${OPUS_FRONTEND_PIDS_LIMIT:-128}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18
+    container_name: opus_downloads_postgres
+    logging: *log
+    environment:
+      POSTGRES_USER: opus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: opus
+    volumes:
+      - ./volumes/postgres:/var/lib/postgresql
+    mem_limit: ${OPUS_DATABASE_MEMORY_LIMIT:-2g}
+    pids_limit: ${OPUS_DATABASE_PIDS_LIMIT:-128}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opus"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # without this the database stays down after a host reboot while backend,
+    # which does restart, spins on "failed to resolve host 'postgres'" forever
+    restart: unless-stopped
+
+networks:
+  # what the engines OPUS starts are attached to, by this name; the database
+  # stays on the default network, which no engine joins
+  engines:
+    name: opus-downloads_engines
+  docker-controller:
+    internal: true
+
+# The landing zone every bundled engine downloads into; consumers take their
+# files from here. env-parameterized (DIDA pattern): dev uses the in-repo
+# ./volumes/landing, production binds the real download tree.
+volumes:
+  landing:
+    driver: local
+    driver_opts:
+      type: ${OPUS_LANDING_VOLUME_TYPE:-none}
+      o: ${OPUS_LANDING_VOLUME_OPTS:-bind}
+      device: ${OPUS_LANDING_DEVICE:-/mnt/docker/opus-downloads/volumes/landing}

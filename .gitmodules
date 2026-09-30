@@ -1,0 +1,12 @@
+[submodule "frontend/src/lib/opus"]
+	path = frontend/src/lib/opus
+	url = https://github.com/Bacinac/opus-ui.git
+[submodule "backend/opus_auth"]
+	path = backend/opus_auth
+	url = https://github.com/Bacinac/opus-auth.git
+[submodule "backend/opus_core"]
+	path = backend/opus_core
+	url = https://github.com/Bacinac/opus-core.git
+[submodule "frontend/src/lib/kit"]
+	path = frontend/src/lib/kit
+	url = https://github.com/Bacinac/ui-kit.git

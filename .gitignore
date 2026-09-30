@@ -1,0 +1,20 @@
+.env
+volumes/
+backend/revision.json
+__pycache__/
+*.pyc
+node_modules/
+.svelte-kit/
+frontend/build/
+frontend/demo-dist/
+plugins/*
+!plugins/README.md
+
+# Internal working docs (Claude instructions, scope notes) — kept on disk for
+# local use, not part of the public repo.
+/CLAUDE.md
+/.claude/
+/docs/SCOPE.md
+
+# Deployment inventory of the live installations; deploy/hosts.conf.example is the template.
+/deploy/hosts.conf
