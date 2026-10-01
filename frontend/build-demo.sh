@@ -10,5 +10,6 @@ rm -rf "$OUT"
 mv build "$OUT"
 . ../backend/opus_core/ops/revision.sh
 opus_revision HEAD false > "$OUT/demo-version.json"
+cp demo/demo-net.js "$OUT/"
 printf '/*  /index.html  200\n' > "$OUT/_redirects"
 echo "OPUS Downloads demo built -> $OUT"
