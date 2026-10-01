@@ -13,6 +13,29 @@ the words.
 
 **Try it:** [demo-opus-downloads.boskovic.biz](https://demo-opus-downloads.boskovic.biz), the real interface with a made-up household inside.
 
+<p align="center"><img src="docs/screenshots/tour.webp" alt="OPUS Downloads in the demo: jobs, search, services and settings" width="100%"></p>
+
+<details>
+<summary>More screenshots</summary>
+
+**Jobs:** one queue over every engine, with each job's progress and where it landed.
+
+![Jobs](docs/screenshots/jobs.webp)
+
+**Search:** one search across indexers, Usenet, torrents and Soulseek; a source that does not answer is named and the others still do.
+
+![Search](docs/screenshots/search.webp)
+
+**Services:** the engines it runs itself and the ones it adopts, each with its state.
+
+![Services](docs/screenshots/services.webp)
+
+**Settings:** content folders, the VPN and each engine's connection.
+
+![Settings](docs/screenshots/settings.webp)
+
+</details>
+
 ## What it does
 
 Library and Player ask, and Downloads acquires. It searches indexers,
