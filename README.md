@@ -11,6 +11,8 @@ on: a television, a phone or a DAC. Each module is an application of its own,
 with its own address and its own release; they share the sign-in, the look and
 the words.
 
+**Try it:** [demo-opus-downloads.boskovic.biz](https://demo-opus-downloads.boskovic.biz), the real interface with a made-up household inside.
+
 ## What it does
 
 Library and Player ask, and Downloads acquires. It searches indexers,
