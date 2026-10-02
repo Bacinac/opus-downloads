@@ -30,7 +30,6 @@
     "esbuild": true
   },
   "overrides": {
-    "cookie": "0.7.2",
-    "devalue": "5.9.2"
+    "cookie": "0.7.2"
   }
 }
