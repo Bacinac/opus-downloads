@@ -116,7 +116,8 @@ def _valid_envelope(body: dict, engine: str, role: str) -> bool:
 
 
 def _valid_host(host: dict, tunnel: bool) -> bool:
-    if set(host) - {"Binds", "RestartPolicy", "NetworkMode", "CapAdd", "Devices", "Memory", "PidsLimit"}:
+    if set(host) - {"Binds", "Tmpfs", "RestartPolicy", "NetworkMode", "CapAdd", "Devices", "Memory",
+                    "PidsLimit"}:
         return False
     limits = ((settings.vpn_memory_limit_bytes, settings.vpn_pids_limit)
               if tunnel else (settings.engine_memory_limit_bytes, settings.engine_pids_limit))
@@ -130,6 +131,7 @@ def _valid_tunnel(body: dict, host: dict, env: dict[str, str], config: str,
     return (body.get("Image") == "qmcgaw/gluetun"
             and host.get("Binds") == [f"{config}/tunnel:/gluetun/auth"]
             and host.get("CapAdd") == ["NET_ADMIN"] and host.get("NetworkMode") is None
+            and host.get("Tmpfs") is None
             and host.get("Devices") == [{
                 "PathOnHost": "/dev/net/tun", "PathInContainer": "/dev/net/tun",
                 "CgroupPermissions": "rwm",
@@ -142,7 +144,8 @@ def _valid_tunnel(body: dict, host: dict, env: dict[str, str], config: str,
 def _valid_engine(body: dict, host: dict, env: dict[str, str], config: str,
                   engine: str) -> bool:
     spec = SPEC_BY_NAME[engine]
-    if body.get("Image") != spec.image or host.get("CapAdd") is not None or host.get("Devices") is not None:
+    if (body.get("Image") != spec.image or host.get("CapAdd") is not None
+            or host.get("Devices") is not None or host.get("Tmpfs") is not None):
         return False
     if not _valid_binds(host["Binds"], config, spec):
         return False
@@ -156,7 +159,7 @@ def _valid_engine(body: dict, host: dict, env: dict[str, str], config: str,
 
 def _valid_solver(body: dict, host: dict, env: dict[str, str], engine: str) -> bool:
     return (body.get("Image") == SOLVER_IMAGE and host.get("Binds") == []
-            and host.get("CapAdd") is None and host.get("Devices") is None
+            and host.get("Tmpfs") == {"/config": ""} and host.get("CapAdd") is None and host.get("Devices") is None
             and env == {"TZ": settings.timezone} and _valid_network(body, host, engine))
 
 

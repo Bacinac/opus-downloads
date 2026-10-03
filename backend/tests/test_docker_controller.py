@@ -67,6 +67,8 @@ def test_controller_accepts_the_solver_only_beside_the_engine_that_has_one(use_v
     assert docker_controller._allowed("POST", "images/create", {"fromImage": body["Image"]}, None)
     assert not docker_controller._allowed(*create, {"name": "opus_solver_sabnzbd"}, body)
     assert not docker_controller._allowed(*create, {"name": "opus_prowlarr"}, body)
+    wider = {**body, "HostConfig": {**body["HostConfig"], "Tmpfs": {"/config": "", "/etc": ""}}}
+    assert not docker_controller._allowed(*create, {"name": "opus_solver_prowlarr"}, wider)
     body["HostConfig"]["Binds"] = ["/:/host"]
     assert not docker_controller._allowed(*create, {"name": "opus_solver_prowlarr"}, body)
 

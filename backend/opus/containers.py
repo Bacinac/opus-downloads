@@ -249,9 +249,12 @@ def solver_spec(spec: EngineSpec, use_vpn: bool) -> dict:
     """The browser beside an engine that answers Cloudflare's challenge for it.
     A clearance holds only for the address that earned it, so the solver goes
     out wherever its engine does: inside the same tunnel, or on the same
-    network when there is none. It keeps nothing, so it mounts nothing."""
+    network when there is none. It keeps nothing, so it mounts nothing; the
+    /config its image declares is a tmpfs, or every recreate would leave another
+    anonymous volume behind."""
     host: dict[str, Any] = {
         "Binds": [],
+        "Tmpfs": {"/config": ""},
         "RestartPolicy": {"Name": "unless-stopped"},
         "Memory": settings.engine_memory_limit_bytes,
         "PidsLimit": settings.engine_pids_limit,
