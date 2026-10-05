@@ -7,6 +7,7 @@ const devHost = process.env.OPUS_DEV_HOST;
 
 export default defineConfig({
 	plugins: [sveltekit()],
+	resolve: process.env.VITEST ? { conditions: ['browser'] } : undefined,
 	test: {
 		include: ['src/**/*.test.ts']
 	},
