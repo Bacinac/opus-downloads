@@ -117,6 +117,8 @@ export const hr = {
 	'services.inside': 'Interno',
 	'services.lanOnly': 'samo lokalna mreža',
 	'services.none': 'Nijedan pogon nema vlastito sučelje.',
+	'services.open': 'Otvorite {name}',
+	'services.ownPage': 'Sučelje se otvara na zasebnoj stranici.',
 	'services.stopped': 'Kontejner nije pokrenut. Pokrenite ga u Postavkama.',
 	'settings.err.bad_connections': 'broj veza mora biti cijeli broj od 1 do 500',
 	'settings.err.bad_name': 'dopuštena su samo mala slova, brojke, - i _',

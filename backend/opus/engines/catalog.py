@@ -59,6 +59,7 @@ BUILT_IN: tuple[EngineSpec, ...] = (
         image="lscr.io/linuxserver/qbittorrent:latest",
         service_port=8080,
         serves_at_base_path=False,
+        ui_embeddable=False,
     ),
     EngineSpec(
         name="slskd",

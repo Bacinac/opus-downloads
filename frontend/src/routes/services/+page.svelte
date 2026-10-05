@@ -65,11 +65,20 @@
 					</div>
 				{/if}
 				{#if current.container?.running}
-					<iframe
-						title={current.name}
-						src={current.ui_url}
-						sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads"
-					></iframe>
+					{#if current.ui_embeddable}
+						<iframe
+							title={current.name}
+							src={current.ui_url}
+							sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads"
+						></iframe>
+					{:else}
+						<div class="said">
+							<p>{t('services.ownPage')}</p>
+							<p><a class="at" href={current.ui_url} target="_blank" rel="noreferrer">
+								{t('services.open', { name: t(`engine.${current.name}` as MessageKey) })}
+							</a></p>
+						</div>
+					{/if}
 				{:else}
 					<p class="standing">{t('services.stopped')}</p>
 				{/if}

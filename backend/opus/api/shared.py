@@ -84,5 +84,6 @@ def engine_to_dict(e: Engine, health: EngineHealth) -> dict:
         "use_vpn": e.config.use_vpn,
         "ui_url": (f"{settings.engines_url}{ui_base_path(e.name)}/"
                    if e.mode is EngineMode.BUNDLED else ""),
+        "ui_embeddable": e.spec.ui_embeddable,
         "health": {"ok": health.ok, "detail": health.detail},
     }

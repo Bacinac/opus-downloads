@@ -40,6 +40,7 @@ export type EngineInfo = {
 	use_vpn: boolean;
 	// where a bundled engine's own interface opens, on the engines' own origin
 	ui_url: string;
+	ui_embeddable: boolean;
 	health: EngineHealth;
 	// a bundled engine's container, or the one an engine that left bundled mode
 	// could not take down

@@ -117,6 +117,8 @@ export const en = {
 	'services.inside': 'Internal',
 	'services.lanOnly': 'local network only',
 	'services.none': 'No engine has an interface of its own.',
+	'services.open': 'Open {name}',
+	'services.ownPage': 'The interface opens on its own page.',
 	'services.stopped': 'The container is not running. Start it in Settings.',
 	'settings.err.bad_connections': 'connections must be a whole number from 1 to 500',
 	'settings.err.bad_name': 'only lowercase letters, digits, - and _ are allowed',

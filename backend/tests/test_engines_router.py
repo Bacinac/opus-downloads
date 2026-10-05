@@ -111,3 +111,17 @@ async def test_stop_takes_down_an_adopted_engines_leftover_but_not_an_in_process
     resp = await api.post("/api/engines/ytdlp/stop")
     assert resp.status_code == 400 and "no container" in resp.json()["detail"]
     assert taken == ["slskd"]
+
+
+@pytest.mark.parametrize(("name", "embeddable"), [
+    ("qbittorrent", False), ("prowlarr", True), ("sabnzbd", True), ("slskd", True),
+])
+def test_bundled_ui_capability_keeps_engine_pages_on_their_own_origin(name, embeddable):
+    from opus.api.shared import engine_to_dict
+    from opus.config import settings
+    from opus.engines.registry import build_engine
+
+    engine = build_engine(RuntimeConfig({f"{name}_mode": "bundled"}), name)
+    answer = engine_to_dict(engine, EngineHealth(True, "ready"))
+    assert answer["ui_embeddable"] is embeddable
+    assert answer["ui_url"] == f"{settings.engines_url}/api/engines/{name}/ui/"

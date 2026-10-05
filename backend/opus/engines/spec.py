@@ -78,6 +78,7 @@ class EngineSpec:
     # such setting and answers 404 to anything carrying a prefix, so what is
     # served under one has to be cut back to its root before it arrives.
     serves_at_base_path: bool = True
+    ui_embeddable: bool = True
     # whether a browser runs beside it when bundled, one that answers a site's
     # Cloudflare challenge so the indexers behind one can be searched at all
     solver: bool = False
