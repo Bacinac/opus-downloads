@@ -20,6 +20,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
 from opus.db import SessionLocal
+from opus import claims
 from opus.engines.base import Engine, EngineMode, Grabber
 from opus.engines.registry import EngineRefused, UnknownEngine, build_engine
 from opus.models import Job, JobEvent, JobState
@@ -93,11 +94,31 @@ async def start(runtime: RuntimeConfig, grab_ref: dict, namespace: str,
     if idempotency_key and not app:
         raise JobError("an idempotency key needs an app")
 
+    if idempotency_key:
+        async with SessionLocal() as session:
+            prior = (await session.execute(select(Job).where(
+                Job.app == app, Job.idempotency_key == idempotency_key))).scalar_one_or_none()
+        if prior is not None:
+            return await _already_started(app, idempotency_key,
+                                          _request_fingerprint(grab_ref, namespace))
+    job_id = uuid.uuid4().hex
+    prepared = await engine.reference(grab_ref, namespace, job_id)
+    claim = prepared["landing"] if engine.claims_directory else None
+    async with claims.locked(claim):
+        async with claims.locked(f"opus:enqueue:{engine.name}" if engine.claims_directory else None):
+            return await _start_reserved(engine, grab_ref, namespace, app, idempotency_key,
+                                         job_id, prepared, claim)
+
+
+async def _start_reserved(engine, grab_ref: dict, namespace: str, app: str | None,
+                          idempotency_key: str | None, job_id: str, prepared: dict,
+                          claim: str | None) -> Job:
+
     # the row before the download: a download nothing records is one nobody can
     # find again, let alone stop
     job = Job(
-        id=uuid.uuid4().hex,
-        engine=name,
+        id=job_id,
+        engine=engine.name,
         app=app,
         namespace=namespace,
         title=grab_ref.get("title", ""),
@@ -105,22 +126,23 @@ async def start(runtime: RuntimeConfig, grab_ref: dict, namespace: str,
         idempotency_key=idempotency_key,
         idempotency_fingerprint=(_request_fingerprint(grab_ref, namespace)
                                  if idempotency_key else None),
-        job_ref={},
+        job_ref=prepared,
+        landing_claim=claim,
         state=JobState.QUEUED,
         seen_at=datetime.now(timezone.utc),
     )
-    async with SessionLocal() as session:
-        session.add(job)
-        try:
-            await session.commit()
-        except IntegrityError:
-            await session.rollback()
-            # The row is committed before an engine is asked, so seeing this
-            # key means another request owns the one permitted engine grab.
+    try:
+        await claims.reserve(job)
+    except claims.Occupied as exc:
+        raise JobError(str(exc)) from exc
+    except IntegrityError:
+        if idempotency_key:
             return await _already_started(app, idempotency_key, job.idempotency_fingerprint)
+        raise
     await _record(job.id, "accepted")
     try:
-        job_ref = await engine.grab(grab_ref, namespace)
+        ref = {**grab_ref, "_prepared": prepared} if prepared else grab_ref
+        job_ref = await engine.grab(ref, namespace)
     except Exception as exc:
         error = redacted(str(exc))
         await _written(job.id, state=JobState.FAILED, error=error)
@@ -192,7 +214,6 @@ async def refresh(runtime: RuntimeConfig, job_id: str, app: str | None = None) -
         raise JobError(f"{job.engine}: engine is not configured")
     status = await engine.status(job.job_ref)
 
-    previous_state = job.state
     if status.seen:
         job.seen_at = now
         job.state = JobState(status.state)
@@ -206,9 +227,25 @@ async def refresh(runtime: RuntimeConfig, job_id: str, app: str | None = None) -
     if job.state is JobState.COMPLETE and not job.landing_path:
         job.landing_path = engine.landed(await engine.completed_path(job.job_ref))
 
-    if not await _written(job_id, seen_at=job.seen_at, state=job.state, progress=job.progress,
-                          error=job.error, landing_path=job.landing_path):
-        raise JobNotFound(f"job {job_id} was dropped while its engine was being asked")
+    async with SessionLocal() as session:
+        current = (await session.execute(select(Job).where(Job.id == job_id)
+                                        .with_for_update())).scalar_one_or_none()
+        if current is None:
+            raise JobNotFound(f"job {job_id} was dropped while its engine was being asked")
+        if current.state is JobState.COMPLETE and current.landing_path:
+            return current, {}
+        if current.seen_at > now:
+            return current, {}
+        previous_state = current.state
+        if current.state is JobState.DOWNLOADING and job.state is JobState.QUEUED:
+            job.state = current.state
+        current.seen_at = max(current.seen_at, job.seen_at)
+        current.state = job.state
+        current.progress = max(current.progress, job.progress)
+        current.error = job.error
+        current.landing_path = job.landing_path or current.landing_path
+        await session.commit()
+        job = current
     if job.state != previous_state:
         await _record(job_id, "state")
     return job, {
@@ -224,9 +261,15 @@ async def _starting(job: Job, now: datetime) -> tuple[Job, dict]:
     if job.state is not JobState.FAILED and now - job.created_at > FORGOTTEN_AFTER:
         job.state = JobState.FAILED
         job.error = "its download was never started: the grab did not come back"
-        if not await _written(job.id, state=job.state, error=job.error):
-            raise JobNotFound(f"job {job.id} does not exist")
-        await _record(job.id, "failed", job.error)
+        async with SessionLocal() as session:
+            written = await session.execute(update(Job).where(
+                Job.id == job.id, Job.job_ref == {}, Job.state == JobState.QUEUED
+            ).values(state=job.state, error=job.error))
+            await session.commit()
+        if written.rowcount:
+            await _record(job.id, "failed", job.error)
+        else:
+            job = await get(job.id)
     return job, {"detail": "" if job.state is JobState.FAILED else "starting"}
 
 
@@ -238,13 +281,21 @@ async def cancel(runtime: RuntimeConfig, job_id: str, app: str | None = None) ->
     row nobody can act on only stands in the way, and what the engine may still
     hold is said in the log."""
     job = await get(job_id, app)
+    async with claims.locked(job.landing_claim):
+        await _cancel_owned(runtime, job_id, app)
+
+
+async def _cancel_owned(runtime: RuntimeConfig, job_id: str, app: str | None) -> None:
+    job = await get(job_id, app)
     try:
         engine = build_engine(runtime, job.engine)
     except UnknownEngine:
         engine = None
     # a job with no job_ref is still being started, or never was: the start sees
     # the row gone and stops its own download
-    if job.job_ref and engine is not None and _reachable(engine):
+    if engine is not None and isinstance(engine, Grabber) and engine.claims_directory and not job.landing_claim:
+        log.info("job %s no longer owns a landing directory; dropping bookkeeping", job.id)
+    elif job.job_ref and engine is not None and _reachable(engine):
         await engine.cancel(job.job_ref)
     elif job.job_ref:
         log.warning("job %s dropped without stopping it: %s is not configured, so "

@@ -1,20 +1,8 @@
-"""slskd — Soulseek search and grab in one engine. Unlike the indexer-mediated
-pair it is its own index: a search asks the network and every response is a
-candidate folder held by one peer, which is also the unit that gets grabbed.
-
-OPUS hands back whole folders and nothing else. Picking which of a peer's files
-belong to the release is domain logic (which tracks, which edition) and stays in
-the consuming app; here a folder is a release and its file list rides along in
-the grab_ref.
-
-slskd has no notion of categories and never reports where it wrote: it recreates
-the peer's folder, by name, directly under its one downloads directory. So the
-namespace isolates nothing here, and two folders that share a name share a
-place on disk — which is why a grab is refused while another folder of that
-name is still arriving or still lying there."""
+"""Soulseek acquisition through isolated, durably recorded download batches."""
 
 import asyncio
 import posixpath
+from urllib.parse import quote
 from pathlib import Path
 
 from opus.config import settings
@@ -49,10 +37,6 @@ def _folder(directory: str) -> str:
     return posixpath.basename(_normalize(directory))
 
 
-def _holds_files(folder: Path) -> bool:
-    return folder.is_dir() and any(folder.iterdir())
-
-
 def _remove(folder: Path, names: list[str]) -> None:
     for name in names:
         (folder / name).unlink(missing_ok=True)
@@ -62,6 +46,20 @@ def _remove(folder: Path, names: list[str]) -> None:
 
 class SlskdEngine(ServiceEngine, Searcher, Grabber):
     api_path = "/api/v0"
+    claims_directory = True
+
+    async def reference(self, grab_ref: dict, namespace: str, job_id: str) -> dict:
+        from opus.settings_store import NAME
+
+        if not NAME.fullmatch(namespace):
+            raise EngineError(f"{self.name}: invalid batch namespace")
+        async with self.http(15) as client:
+            root = await self._downloads_root(client)
+        destination = f"{namespace}/{job_id}"
+        return {"username": grab_ref["username"], "batch": job_id,
+                "destination": destination, "landing": self._landed(root, destination),
+                "files": [posixpath.basename(_normalize(file["filename"]))
+                          for file in grab_ref["files"]]}
 
     def auth_headers(self) -> dict[str, str]:
         return {"X-API-Key": self.secret("api_key")}
@@ -152,57 +150,46 @@ class SlskdEngine(ServiceEngine, Searcher, Grabber):
         )
 
     async def grab(self, grab_ref: dict, namespace: str) -> dict:
-        username = grab_ref["username"]
+        reference = grab_ref["_prepared"]
         files = grab_ref["files"]
         if not files:
             raise EngineError(f"{self.name}: grab_ref carries no files")
-        # only what slskd's API takes: the grab_ref also carries per-file bitrate
-        # for the caller's benefit, and the peer has no use for it
-        wanted = [{"filename": f["filename"], "size": f.get("size", 0)} for f in files]
+        if len(set(reference["files"])) != len(files):
+            raise EngineError(f"{self.name}: duplicate destination filenames")
+        if Path(reference["landing"]).exists():
+            raise EngineError(f"{self.name}: batch directory already exists")
+        wanted = [{"filename": file["filename"], "size": file.get("size", 0)} for file in files]
         async with self.http(30) as client:
-            await self._refuse_shared_folder(client, _folder(grab_ref["directory"]))
-            resp = await client.post(f"/transfers/downloads/{username}", json=wanted)
-            resp.raise_for_status()
-        return {
-            "username": username,
-            "directory": grab_ref["directory"],
-            "files": [f["filename"] for f in files],
-        }
+            response = await client.post("/transfers/downloads/batches", json={
+                "id": reference["batch"], "username": reference["username"], "files": wanted,
+                "options": {"destination": reference["destination"], "externalId": reference["batch"]},
+            })
+            response.raise_for_status()
+            failures = response.json().get("failures", [])
+            if failures:
+                raise EngineError(f"{self.name}: batch could not enqueue {len(failures)} files")
+        return reference
 
-    async def _refuse_shared_folder(self, client, folder: str) -> None:
-        resp = await client.get("/transfers/downloads")
-        resp.raise_for_status()
-        for user in resp.json():
-            for directory in user.get("directories", []):
-                if _folder(directory.get("directory", "")) != folder:
-                    continue
-                if any(not f.get("state", "").startswith("Completed")
-                       for f in directory.get("files", [])):
-                    raise EngineError(
-                        f"{self.name}: a folder named {folder!r} is already arriving from "
-                        f"{user.get('username')}, and this one would land in the same place"
-                    )
-        landed = Path(self._landed(await self._downloads_root(client), folder))
-        if await asyncio.to_thread(_holds_files, landed):
-            raise EngineError(
-                f"{self.name}: {landed} still holds another download's files, and this "
-                "one would land among them"
-            )
-
-    async def _transfers(self, client, username: str, wanted: set[str]) -> list[dict]:
-        resp = await client.get(f"/transfers/downloads/{username}")
-        resp.raise_for_status()
-        return [
-            file
-            for directory in resp.json().get("directories", [])
-            for file in directory.get("files", [])
-            if file.get("filename") in wanted
-        ]
+    async def _transfers(self, client, job_ref: dict) -> list[dict]:
+        if job_ref["batch"] is not None:
+            response = await client.get(f"/transfers/downloads/batches/{job_ref['batch']}")
+            if response.status_code == 404:
+                return []
+            response.raise_for_status()
+            return response.json().get("transfers", [])
+        transfers = []
+        username = quote(job_ref["username"], safe="")
+        for transfer_id in job_ref["transfers"]:
+            response = await client.get(f"/transfers/downloads/{username}/{quote(transfer_id, safe='')}")
+            if response.status_code != 404:
+                response.raise_for_status()
+                transfers.append(response.json())
+        return transfers
 
     async def status(self, job_ref: dict) -> JobStatus:
         wanted = set(job_ref["files"])
         async with self.http(15) as client:
-            transfers = await self._transfers(client, job_ref["username"], wanted)
+            transfers = await self._transfers(client, job_ref)
         if not transfers:
             return unseen("slskd holds no transfer for these files")
 
@@ -233,28 +220,14 @@ class SlskdEngine(ServiceEngine, Searcher, Grabber):
         return self.landing_path(f"{root}/{folder}", root)
 
     async def completed_path(self, job_ref: dict) -> str:
-        async with self.http(15) as client:
-            root = await self._downloads_root(client)
-        return self._landed(root, _folder(job_ref["directory"]))
+        return self.landed(job_ref["landing"])
 
     async def cancel(self, job_ref: dict) -> None:
-        """slskd forgets a transfer when told to remove it and leaves its file
-        where it landed — exactly where the next folder of that name would
-        write. So the files this job names are deleted from the landing zone
-        too, and the folder with them once nothing else is in it."""
-        wanted = set(job_ref["files"])
-        username = job_ref["username"]
+        username = quote(job_ref["username"], safe="")
         async with self.http(30) as client:
-            for transfer in await self._transfers(client, username, wanted):
-                if not transfer.get("id"):
-                    continue
-                resp = await client.delete(
-                    f"/transfers/downloads/{username}/{transfer['id']}",
-                    params={"remove": "true"},
-                )
-                resp.raise_for_status()
-            root = await self._downloads_root(client)
-        await asyncio.to_thread(
-            _remove, Path(self._landed(root, _folder(job_ref["directory"]))),
-            [posixpath.basename(_normalize(f)) for f in wanted],
-        )
+            for transfer in await self._transfers(client, job_ref):
+                transfer_id = quote(transfer["id"], safe="")
+                response = await client.delete(
+                    f"/transfers/downloads/{username}/{transfer_id}", params={"remove": "true"})
+                response.raise_for_status()
+        await asyncio.to_thread(_remove, Path(self.landed(job_ref["landing"])), job_ref["files"])

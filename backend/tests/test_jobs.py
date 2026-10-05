@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -70,6 +71,44 @@ async def test_a_landed_job_never_regresses_and_its_engine_is_not_asked(api, mon
     job = await add(state=JobState.COMPLETE, seen_ago=600, landing="/landing/usenet/music/x")
     body = (await api.get(f"/api/jobs/{job}")).json()
     assert body["state"] == "complete" and calls == []
+
+
+@pytest.mark.parametrize("late_status", [JobStatus("downloading", progress=0.4),
+                                         UNSEEN, JobStatus("failed", detail="stale error")])
+async def test_a_delayed_poll_cannot_overwrite_concurrent_completion(api, monkeypatch, late_status):
+    from opus import jobs
+    from opus.settings_store import RuntimeConfig, current_runtime
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def status(self, ref):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered.set()
+            await release.wait()
+            return late_status
+        return JobStatus("complete", progress=1)
+
+    async def landed(self, ref):
+        return f"{settings.landing_root}/usenet/music/Album"
+
+    monkeypatch.setattr(sabnzbd.SabnzbdEngine, "status", status)
+    monkeypatch.setattr(sabnzbd.SabnzbdEngine, "completed_path", landed)
+    job_id = await add()
+    runtime = await current_runtime()
+    runtime = RuntimeConfig({**runtime.values, "sabnzbd_landing_dir": f"{settings.landing_root}/usenet"})
+    delayed = asyncio.create_task(jobs.refresh(runtime, job_id))
+    await entered.wait()
+    completed, _ = await jobs.refresh(runtime, job_id)
+    release.set()
+    late, live = await delayed
+    row = await stored(job_id)
+    assert row.state is late.state is JobState.COMPLETE
+    assert row.progress == 1
+    assert row.landing_path == completed.landing_path
+    assert live == {}
 
 
 async def test_a_seen_job_records_its_progress_and_when_it_was_seen(api, monkeypatch):

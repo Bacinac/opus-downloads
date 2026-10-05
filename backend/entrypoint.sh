@@ -6,6 +6,7 @@ elif [ "${1:-}" = "engine-ui" ]; then
     app=opus.engine_ui:app port=8099
 else
     alembic upgrade head
+    python -m opus.claims
     app=opus.main:app port=8097
 fi
 if [ "${OPUS_DEV_RELOAD:-0}" = "1" ]; then

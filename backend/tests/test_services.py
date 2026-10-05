@@ -1,3 +1,6 @@
+import asyncio
+import json
+import uuid
 from pathlib import Path
 
 import httpx
@@ -12,6 +15,9 @@ from opus.engines.catalog import SPEC_BY_NAME
 class Creds:
     def get(self, engine, key):
         return "k"
+
+    def has(self, engine, key):
+        return True
 
 
 @pytest.fixture
@@ -40,84 +46,150 @@ def peer():
 
 @pytest.fixture
 def soulseek(route):
-    transfers, posted, deleted = [], [], []
+    batches, posted, deleted = {}, [], []
 
     def handler(request):
         path = request.url.path
         if path == "/api/v0/options":
             return httpx.Response(200, json={"directories": {"downloads": "/downloads"}})
-        if path == "/api/v0/transfers/downloads" and request.method == "GET":
-            return httpx.Response(200, json=transfers)
-        if path.startswith("/api/v0/transfers/downloads/") and request.method == "POST":
-            posted.append(path)
-            return httpx.Response(201)
-        if path.startswith("/api/v0/transfers/downloads/") and request.method == "GET":
-            user = path.rsplit("/", 1)[1]
-            return httpx.Response(200, json={"directories": [
-                d for u in transfers if u["username"] == user for d in u["directories"]]})
+        if path == "/api/v0/transfers/downloads/batches" and request.method == "POST":
+            body = json.loads(request.content)
+            posted.append(body)
+            batches[body["id"]] = []
+            return httpx.Response(201, json={"batch": {"id": body["id"]}, "failures": []})
+        if path.startswith("/api/v0/transfers/downloads/batches/") and request.method == "GET":
+            batch_id = path.rsplit("/", 1)[1]
+            if batch_id not in batches:
+                return httpx.Response(404)
+            return httpx.Response(200, json={"transfers": batches[batch_id]})
         if request.method == "DELETE":
             deleted.append(path)
             return httpx.Response(204)
         return httpx.Response(404)
     route(handler)
     landing = f"{settings.landing_root}/soulseek"
-    return engine(slskd.SlskdEngine, "slskd", "http://slskd:5030", landing), transfers, posted, deleted
+    return engine(slskd.SlskdEngine, "slskd", "http://slskd:5030", landing), batches, posted, deleted
 
 
-async def test_slskd_grabs_a_free_folder_and_refuses_one_already_in_use(soulseek, peer):
-    eng, transfers, posted, _ = soulseek
-    await eng.grab(peer, "music")
-    assert posted == ["/api/v0/transfers/downloads/peer1"]
+async def batch(eng, peer, namespace="music"):
+    reference = await eng.reference(peer, namespace, uuid.uuid4().hex)
+    return await eng.grab({**peer, "_prepared": reference}, namespace)
 
-    transfers[:] = [{"username": "peer2", "directories": [{
-        "directory": "@@y\\Other\\Album (2001)", "files": [{"filename": "x", "state": "InProgress"}]}]}]
-    with pytest.raises(EngineError, match="already arriving from peer2"):
-        await eng.grab(peer, "music")
 
-    transfers[0]["directories"][0]["files"][0]["state"] = "Completed, Succeeded"
-    landed = Path(eng.landing_dir(), "Album (2001)")
+async def test_slskd_grabs_with_explicit_isolated_batch_destinations(soulseek, peer):
+    eng, _, posted, _ = soulseek
+    first, second = await asyncio.gather(batch(eng, peer), batch(eng, peer, "other"))
+    assert first["landing"] != second["landing"]
+    assert {body["options"]["destination"] for body in posted} == {
+        first["destination"], second["destination"]}
+
+
+async def test_slskd_cancel_removes_only_its_batch_transfers_and_files(soulseek, peer):
+    eng, batches, _, deleted = soulseek
+    ref = await batch(eng, peer)
+    landed = Path(await eng.completed_path(ref))
     landed.mkdir(parents=True)
-    (landed / "01 A.flac").write_text("a")
-    with pytest.raises(EngineError, match="still holds another download's files"):
-        await eng.grab(peer, "music")
-
-
-async def test_slskd_cancel_removes_transfers_files_and_the_emptied_folder(soulseek, peer):
-    eng, transfers, _, deleted = soulseek
-    job_ref = await eng.grab(peer, "music")
-    landed = Path(await eng.completed_path(job_ref))
-    assert landed == Path(settings.landing_root, "soulseek", "Album (2001)")
-    landed.mkdir(parents=True)
-    for name in ("01 A.flac", "02 B.flac"):
+    for name in ref["files"]:
         (landed / name).write_text(name)
-    transfers[:] = [{"username": "peer1", "directories": [{"directory": peer["directory"], "files": [
+    batches[ref["batch"]] = [
         {"id": "t1", "filename": peer["files"][0]["filename"], "state": "Completed, Succeeded"},
-        {"id": "t2", "filename": peer["files"][1]["filename"], "state": "InProgress"}]}]}]
-    await eng.cancel(job_ref)
+        {"id": "t2", "filename": peer["files"][1]["filename"], "state": "InProgress"}]
+    await eng.cancel(ref)
     assert sorted(deleted) == ["/api/v0/transfers/downloads/peer1/t1",
                                "/api/v0/transfers/downloads/peer1/t2"]
     assert not landed.exists()
 
 
-async def test_a_bundled_engines_own_subfolder_survives_the_shared_root_landing_dir(route, peer):
-    # registry.py hands a bundled engine landing_dir=settings.landing_root — the
-    # shared tree's own top — because a bundled engine has no mount point of its
-    # own to translate from. But slskd, unlike sabnzbd/qbittorrent, downloads
-    # into its own named subfolder of that tree (production's slskd.yml: shows
-    # directories.downloads: /landing/soulseek). Rebasing onto landing_dir the
-    # way an adopted engine's path is rebased would silently throw that
-    # subfolder away and report the album one level too high.
+async def test_concurrent_jobs_persist_distinct_folder_ownership_and_old_cleanup_keeps_new_files(soulseek, peer, monkeypatch):
+    from opus import jobs
+    from opus.models import Job
+    from opus.db import SessionLocal
+    from opus.settings_store import current_runtime
+
+    eng, batches, posted, deleted = soulseek
+    monkeypatch.setattr(jobs, "build_engine", lambda runtime, name: eng)
+    runtime = await current_runtime()
+    first, second = await asyncio.gather(
+        jobs.start(runtime, peer, "music", "library"),
+        jobs.start(runtime, {**peer, "username": "peer2"}, "other", "test"))
+    assert len(posted) == 2
+    assert first.landing_claim != second.landing_claim
+    first_dir, second_dir = Path(first.landing_claim), Path(second.landing_claim)
+    first_dir.mkdir(parents=True)
+    second_dir.mkdir(parents=True)
+    for name in first.job_ref["files"]:
+        (second_dir / name).write_bytes(b"new acquisition")
+    batches[first.id] = []
+    batches[second.id] = [{"id": "new-transfer", "filename": peer["files"][0]["filename"]}]
+    await jobs.cancel(runtime, first.id)
+    assert deleted == []
+    assert all((second_dir / name).read_bytes() == b"new acquisition" for name in first.job_ref["files"])
+    async with SessionLocal() as session:
+        assert await session.get(Job, first.id) is None
+        assert (await session.get(Job, second.id)).landing_claim == second.landing_claim
+
+
+async def test_a_bundled_engines_root_survives_batch_path_translation(route, peer):
     def handler(request):
         if request.url.path == "/api/v0/options":
             return httpx.Response(200, json={
                 "directories": {"downloads": f"{settings.landing_root}/soulseek"}})
-        return httpx.Response(200, json=[])
+        return httpx.Response(201, json={"failures": []})
     route(handler)
     eng = engine(slskd.SlskdEngine, "slskd", "http://slskd:5030", settings.landing_root,
-                mode="bundled")
-    job_ref = await eng.grab(peer, "music")
-    landed = await eng.completed_path(job_ref)
-    assert landed == str(Path(settings.landing_root, "soulseek", "Album (2001)"))
+                 mode="bundled")
+    ref = await batch(eng, peer)
+    assert await eng.completed_path(ref) == str(Path(settings.landing_root, "soulseek", ref["destination"]))
+
+
+async def test_legacy_upgrade_pins_transfer_ids_and_old_history_cannot_clean_the_current_owner(route, peer, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from opus import claims, jobs
+    from opus.db import SessionLocal
+    from opus.models import Job, JobState, Setting
+    from opus.settings_store import current_runtime
+
+    deleted = []
+
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/options"):
+            return httpx.Response(200, json={"directories": {"downloads": "/downloads"}})
+        if request.method == "DELETE":
+            deleted.append(path)
+            return httpx.Response(204)
+        user = path.rsplit("/", 1)[1]
+        return httpx.Response(200, json={"directories": [{"files": [
+            {"id": user + "-transfer", "filename": peer["files"][0]["filename"]}]}]})
+
+    route(handler)
+    eng = engine(slskd.SlskdEngine, "slskd", "http://slskd:5030", f"{settings.landing_root}/soulseek")
+    monkeypatch.setattr(claims, "build_engine", lambda runtime, name: eng)
+    monkeypatch.setattr(jobs, "build_engine", lambda runtime, name: eng)
+    ids = [uuid.uuid4().hex for _ in range(2)]
+    async with SessionLocal() as session:
+        for index, job_id in enumerate(ids):
+            ref = {"username": f"peer{index}", "directory": peer["directory"],
+                   "files": [file["filename"] for file in peer["files"]]}
+            session.add(Job(id=job_id, engine="slskd", namespace="music", grab_ref=peer,
+                            job_ref=ref, state=JobState.COMPLETE,
+                            created_at=datetime.now(timezone.utc) + timedelta(seconds=index)))
+        await session.commit()
+    await claims.adopt()
+    await claims.adopt()
+    landing = Path(settings.landing_root, "soulseek", "Album (2001)")
+    landing.mkdir(parents=True)
+    newer_file = landing / "01 A.flac"
+    newer_file.write_bytes(b"current owner's acquisition")
+    async with SessionLocal() as session:
+        assert (await session.get(Setting, "landing_claims_version")).value == "1"
+        assert (await session.get(Job, ids[0])).landing_claim is None
+        current = await session.get(Job, ids[1])
+        assert current.landing_claim == str(landing)
+        assert current.job_ref["transfers"] == ["peer1-transfer"]
+    await jobs.cancel(await current_runtime(), ids[0])
+    assert newer_file.read_bytes() == b"current owner's acquisition"
+    assert deleted == []
 
 
 @pytest.mark.parametrize(("states", "expected", "seen"), [
@@ -127,20 +199,20 @@ async def test_a_bundled_engines_own_subfolder_survives_the_shared_root_landing_
     (["Completed, Succeeded", "InProgress"], "downloading", True),
 ])
 async def test_slskd_status(soulseek, peer, states, expected, seen):
-    eng, transfers, _, _ = soulseek
-    job_ref = await eng.grab(peer, "music")
-    transfers[:] = [{"username": "peer1", "directories": [{"directory": peer["directory"], "files": [
-        {"filename": f["filename"], "state": s, "size": 10, "bytesTransferred": 5}
-        for f, s in zip(peer["files"], states)]}]}] if states else []
+    eng, batches, _, _ = soulseek
+    job_ref = await batch(eng, peer)
+    batches[job_ref["batch"]] = [
+        {"filename": file["filename"], "state": state, "size": 10, "bytesTransferred": 5}
+        for file, state in zip(peer["files"], states)]
     status = await eng.status(job_ref)
     assert (status.state, status.seen) == (expected, seen)
 
 
-@pytest.mark.parametrize("directory", ["@@x\\Music\\..", "@@x\\Music\\.", ""])
-async def test_slskd_refuses_a_folder_that_is_no_folder_of_its_own(soulseek, peer, directory):
+@pytest.mark.parametrize("namespace", ["../etc", "/etc", "music/../../etc"])
+async def test_slskd_refuses_a_batch_destination_outside_its_root(soulseek, peer, namespace):
     eng, _, posted, _ = soulseek
-    with pytest.raises(EngineError, match="not inside"):
-        await eng.grab({**peer, "directory": directory}, "music")
+    with pytest.raises(EngineError, match="invalid batch namespace"):
+        await eng.reference(peer, namespace, uuid.uuid4().hex)
     assert posted == []
 
 
@@ -173,7 +245,7 @@ async def test_an_engine_landing_outside_the_landing_zone_is_refused(route):
     eng = engine(slskd.SlskdEngine, "slskd", "http://slskd:5030", "/etc")
     route(lambda r: httpx.Response(200, json={"directories": {"downloads": "/downloads"}}))
     with pytest.raises(EngineError, match="outside the landing zone"):
-        await eng.completed_path({"directory": "x", "files": []})
+        await eng.reference({"username": "peer", "files": []}, "music", uuid.uuid4().hex)
 
 
 @pytest.mark.parametrize(("torrent", "expected"), [

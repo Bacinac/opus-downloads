@@ -59,6 +59,7 @@ class Job(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(128))
     idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
     job_ref: Mapped[dict] = mapped_column(JSONB, default=dict)
+    landing_claim: Mapped[str | None] = mapped_column(Text, unique=True)
     state: Mapped[JobState] = mapped_column(
         Enum(JobState, values_callable=lambda e: [m.value for m in e]),
         default=JobState.QUEUED,

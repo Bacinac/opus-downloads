@@ -294,6 +294,11 @@ class Grabber(Engine):
     infohash, a soulseek user plus file list). OPUS owns the job id and stores
     the job_ref against it — the engine stays stateless about OPUS."""
 
+    claims_directory = False
+
+    async def reference(self, grab_ref: dict, namespace: str, job_id: str) -> dict:
+        return {}
+
     @abc.abstractmethod
     async def grab(self, grab_ref: dict, namespace: str) -> dict:
         """Start the grab tagged with the caller's namespace (per-app category
