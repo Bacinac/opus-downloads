@@ -20,6 +20,45 @@ QBITTORRENT = SPEC_BY_NAME["qbittorrent"]
 SUBNET = "172.20.0.0/16"
 
 
+@pytest.mark.parametrize("foreign", ["opus_prowlarr", "opus_solver_prowlarr", "opus_vpn_prowlarr"])
+async def test_pause_checks_ownership_of_every_container_before_stopping_any(foreign):
+    class Docker:
+        def __init__(self):
+            self.stopped = []
+
+        async def inspect(self, name):
+            return {"Config": {"Labels": {} if name == foreign else {OWNER_LABEL: "engine"}},
+                    "State": {"Running": True}}
+
+        async def stop(self, name):
+            self.stopped.append(name)
+
+    docker = Docker()
+    with pytest.raises(ContainerError, match="refusing to stop"):
+        await provision.pause(docker, SPEC_BY_NAME["prowlarr"], True)
+    assert docker.stopped == []
+
+
+async def test_pause_stops_owned_containers_and_skips_absent_companions(monkeypatch):
+    stopped = []
+
+    class Docker:
+        async def inspect(self, name):
+            if name == "opus_solver_prowlarr":
+                return None
+            return {"Config": {"Labels": {OWNER_LABEL: "engine"}}, "State": {"Running": True}}
+
+        async def stop(self, name):
+            stopped.append(name)
+
+    async def describe(*args):
+        return {"paused": True}
+
+    monkeypatch.setattr(provision, "describe", describe)
+    assert await provision.pause(Docker(), SPEC_BY_NAME["prowlarr"], True) == {"paused": True}
+    assert stopped == ["opus_prowlarr", "opus_vpn_prowlarr"]
+
+
 @pytest.fixture
 def fast(monkeypatch):
     real_sleep = asyncio.sleep

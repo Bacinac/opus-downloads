@@ -10,7 +10,21 @@ from opus.db import SessionLocal
 from opus.engines.base import EngineConfig
 from opus.engines.catalog import SPEC_BY_NAME
 from opus.engines.ytdlp import YtdlpEngine
+from opus.engines.inprocess import safe_name
 from opus.models import JobState, Run
+
+
+@pytest.mark.parametrize("title", ["Ž" * 180, "音" * 180, "🎵" * 180, "a" * 179 + ". remainder"])
+def test_unicode_names_fit_real_folders_collision_suffixes_and_track_filenames(tmp_path, title):
+    name = safe_name(title)
+    assert len(name.encode("utf-8")) <= 180
+    assert not name.endswith((" ", "."))
+    first = runner._claim(tmp_path, name, "a" * 32)
+    second = runner._claim(tmp_path, name, "b" * 32)
+    filename = f"99-99 - {name}.flac.part"
+    (first / filename).write_bytes(b"track")
+    assert second != first
+    assert (first / filename).read_bytes() == b"track"
 
 
 @pytest.fixture(autouse=True)

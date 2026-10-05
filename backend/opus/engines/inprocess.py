@@ -26,7 +26,7 @@ def safe_name(name: str) -> str:
     might sit on. Service metadata is arbitrary text — a track called
     `AC/DC: Who Made Who?` is not a path."""
     cleaned = _UNSAFE.sub("-", name).strip(" .")
-    return cleaned[:180] or "untitled"
+    return cleaned.encode("utf-8")[:180].decode("utf-8", errors="ignore").rstrip(" .") or "untitled"
 
 
 class InProcessEngine(Grabber):

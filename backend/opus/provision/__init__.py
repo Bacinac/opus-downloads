@@ -23,6 +23,7 @@ from typing import Awaitable, Callable
 
 from opus.config import settings
 from opus.containers import (
+    ContainerError,
     Docker,
     container_name,
     engine_spec,
@@ -144,11 +145,18 @@ async def pause(docker: Docker, spec: EngineSpec, use_vpn: bool) -> dict:
     lets a restart of OPUS bring a lost one back instead of leaving the search
     answering "name not known" for as long as nobody opens its card."""
     async with _lock(spec.name):
-        await docker.stop(container_name(spec.name))
+        names = [container_name(spec.name)]
         if spec.solver:
-            await docker.stop(solver_name(spec.name))
+            names.append(solver_name(spec.name))
         if use_vpn:
-            await docker.stop(vpn_name(spec.name))
+            names.append(vpn_name(spec.name))
+        states = await asyncio.gather(*(state(docker, name) for name in names))
+        for name, info in zip(names, states):
+            if info["present"] and not info["ours"]:
+                raise ContainerError(f"{name} was not created by OPUS; refusing to stop it")
+        for name, info in zip(names, states):
+            if info["present"]:
+                await docker.stop(name)
         failures.pop(spec.name, None)
         return await describe(docker, spec, use_vpn)
 
