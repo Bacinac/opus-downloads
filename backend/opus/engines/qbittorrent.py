@@ -9,9 +9,10 @@ app's downloads in their own subtree of the landing zone. OPUS reads that root
 from the running instance rather than assuming it, so the landing mapping holds
 whatever the instance is configured with."""
 
+import base64
 import hashlib
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
 
@@ -83,10 +84,27 @@ def _infohash(content: bytes) -> str:
 
 def _magnet_hash(magnet: str) -> str | None:
     for xt in parse_qs(urlparse(magnet).query).get("xt", []):
-        match = re.match(r"urn:btih:([0-9a-fA-F]{40})", xt)
+        match = re.fullmatch(r"urn:btih:([0-9a-fA-F]{40}|[A-Za-z2-7]{32})", xt)
         if match:
-            return match.group(1).lower()
+            ident = match.group(1)
+            return (ident if len(ident) == 40 else base64.b32decode(ident.upper()).hex()).lower()
     return None
+
+
+async def _follow(link: str) -> str | bytes:
+    """The magnet or the .torrent an indexer link leads to. Prowlarr hands out its
+    own address for both, and for a magnet that address answers with a redirect
+    to `magnet:` — a scheme no HTTP client follows, so the hops are walked here."""
+    async with httpx.AsyncClient(timeout=60) as fetcher:
+        for _ in range(5):
+            resp = await fetcher.get(link)
+            if not resp.is_redirect:
+                resp.raise_for_status()
+                return resp.content
+            link = urljoin(link, resp.headers["location"])
+            if link.startswith("magnet:"):
+                return link
+    raise EngineError("qbittorrent: the indexer link kept redirecting")
 
 
 class QbittorrentEngine(ServiceEngine, Grabber):
@@ -137,27 +155,26 @@ class QbittorrentEngine(ServiceEngine, Grabber):
 
     async def grab(self, grab_ref: dict, namespace: str) -> dict:
         title = grab_ref.get("title", "")
-        magnet = grab_ref.get("magnet")
+        link = grab_ref.get("magnet") or grab_ref["torrent_url"]
+        found = link if link.startswith("magnet:") else await _follow(link)
+        if isinstance(found, str):
+            infohash = _magnet_hash(found)
+            if not infohash:
+                raise EngineError(f"{self.name}: the magnet carries no infohash")
+        else:
+            # tracked by the infohash computed here, not one qBittorrent picked
+            infohash = _infohash(found)
         async with self.http(60) as client:
             await self._login(client)
             await self._ensure_category(client, namespace, f"{await self._save_root(client)}/{namespace}")
-            if magnet:
-                infohash = _magnet_hash(magnet)
-                if not infohash:
-                    raise EngineError(f"{self.name}: the magnet carries no infohash")
+            if isinstance(found, str):
                 resp = await client.post("/api/v2/torrents/add", data={
-                    "urls": magnet, "category": namespace,
+                    "urls": found, "category": namespace,
                 })
             else:
-                # the indexer serves a .torrent file: fetch it here so the job is
-                # tracked by the infohash we computed, not one qBittorrent picked
-                async with httpx.AsyncClient(timeout=60, follow_redirects=True) as fetcher:
-                    torrent = await fetcher.get(grab_ref["torrent_url"])
-                    torrent.raise_for_status()
-                infohash = _infohash(torrent.content)
                 resp = await client.post(
                     "/api/v2/torrents/add",
-                    files={"torrents": ("release.torrent", torrent.content,
+                    files={"torrents": ("release.torrent", found,
                                         "application/x-bittorrent")},
                     data={"category": namespace},
                 )

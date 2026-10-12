@@ -1,7 +1,10 @@
 import asyncio
+import base64
+import hashlib
 import json
 import uuid
 from pathlib import Path
+from urllib.parse import parse_qsl
 
 import httpx
 import pytest
@@ -294,6 +297,51 @@ async def test_what_is_not_a_torrent_is_refused_without_naming_the_indexer(route
         await eng.grab({"engine": "qbittorrent", "title": "t",
                         "torrent_url": "http://indexer/dl?apikey=hunter2"}, "music")
     assert "hunter2" not in str(refused.value) and "indexer/dl" not in str(refused.value)
+
+
+
+def qbt_adding(route, indexer):
+    added = []
+
+    def handler(request):
+        if request.url.host == "prowlarr":
+            return indexer(request)
+        if request.url.path == "/api/v2/auth/login":
+            return httpx.Response(204)
+        if request.url.path == "/api/v2/app/preferences":
+            return httpx.Response(200, json={"save_path": "/downloads"})
+        if request.url.path == "/api/v2/torrents/add":
+            added.append(request)
+            return httpx.Response(200, text="Ok.")
+        return httpx.Response(200)
+    route(handler)
+    return engine(qbittorrent.QbittorrentEngine, "qbittorrent", "http://qbt:8090",
+                  f"{settings.landing_root}/torrent"), added
+
+
+async def test_a_prowlarr_link_that_redirects_to_a_magnet_adds_that_magnet(route):
+    magnet = "magnet:?xt=urn:btih:113F96A92162FB8FCFE51A8FAFB8B76CEF483CFB&dn=x"
+    eng, added = qbt_adding(route, lambda r: httpx.Response(301, headers={"location": magnet}))
+    job = await eng.grab({"engine": "qbittorrent", "title": "t",
+                          "magnet": "http://prowlarr/8/download?apikey=k&link=abc",
+                          "torrent_url": "http://indexer/dl"}, "video")
+    assert job["hash"] == "113f96a92162fb8fcfe51a8fafb8b76cef483cfb"
+    assert dict(parse_qsl(added[0].content.decode()))["urls"] == magnet
+
+
+async def test_a_prowlarr_link_that_serves_the_torrent_adds_the_file(route):
+    torrent = qbittorrent._bencode({b"info": {b"name": b"x", b"length": 1}})
+    eng, added = qbt_adding(route, lambda r: httpx.Response(200, content=torrent))
+    job = await eng.grab({"engine": "qbittorrent", "title": "t",
+                          "magnet": "http://prowlarr/9/download?link=abc"}, "video")
+    assert job["hash"] == hashlib.sha1(qbittorrent._bencode({b"name": b"x", b"length": 1})).hexdigest()
+    assert b"application/x-bittorrent" in added[0].content
+
+
+def test_a_base32_magnet_names_the_same_infohash():
+    hex_id = "113f96a92162fb8fcfe51a8fafb8b76cef483cfb"
+    b32 = base64.b32encode(bytes.fromhex(hex_id)).decode()
+    assert qbittorrent._magnet_hash(f"magnet:?xt=urn:btih:{b32}&dn=x") == hex_id
 
 
 def sab(route, queue=(), history=()):
