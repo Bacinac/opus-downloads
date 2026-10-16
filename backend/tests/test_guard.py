@@ -143,8 +143,8 @@ async def test_the_main_app_no_longer_serves_engine_interfaces(browser, roster):
 
 
 async def test_a_bundled_engine_without_an_origin_for_its_interface_stops_the_start(monkeypatch):
-    applied = []
-    monkeypatch.setattr(provision, "apply_saved", applied.append)
+    reconciled = []
+    monkeypatch.setattr(provision, "reconcile", lambda: reconciled.append(True))
     await store_credentials({"slskd_mode": "bundled"})
     monkeypatch.setattr(settings, "engines_url", "")
     with pytest.raises(RuntimeError, match="OPUS_ENGINES_URL is not set, and slskd run bundled"):
@@ -153,7 +153,7 @@ async def test_a_bundled_engine_without_an_origin_for_its_interface_stops_the_st
     monkeypatch.setattr(settings, "engines_url", "http://engines.test:8099")
     async with main.lifespan(app):
         pass
-    assert applied == [{}]
+    assert reconciled == [True]
 
 
 async def test_every_answer_carries_the_browser_headers(browser):

@@ -326,7 +326,19 @@ def apply_saved(previous: dict[str, str]) -> None:
     """Carry what was just saved into the engines OPUS runs, without holding the
     form that saved it: bringing an engine up can take a minute. Saves queue
     behind each other, so the later one sees what the earlier one left."""
-    task = asyncio.create_task(_apply(previous))
+    _spawn(_apply(previous))
+
+
+def reconcile() -> None:
+    """At startup nothing says what the last process left half done: a start
+    cut off by a restart, or one that failed and took its failure with it. So
+    every bundled engine is started again — a start changes nothing an engine
+    already has, and makes it work where it does not."""
+    _spawn(_apply(None))
+
+
+def _spawn(work) -> None:
+    task = asyncio.create_task(work)
     _applies.add(task)
     task.add_done_callback(_applied)
 
@@ -337,7 +349,7 @@ def _applied(task: asyncio.Task) -> None:
         log.error("applying the saved settings failed", exc_info=task.exception())
 
 
-async def _apply(previous: dict[str, str]) -> None:
+async def _apply(previous: dict[str, str] | None) -> None:
     """A container is built from settings and then stops reading them, so a saved
     change that nobody applies is not a change. Every running bundled engine
     whose definition no longer matches, or whose own settings the save changed,
@@ -357,12 +369,11 @@ async def _apply(previous: dict[str, str]) -> None:
                 if await _missing(docker, engine.spec):
                     log.warning("%s runs bundled and its container is gone; bringing it up",
                                 engine.name)
-                    await start(engine.name, previous)
-                    continue
-                told = previous.keys() & set(PROVISIONERS.get(engine.name, _NONE).owned)
-                if not told and await _settled(docker, engine, runtime):
-                    continue
-                log.info("%s: its settings changed, bringing it up again", engine.name)
+                elif previous is not None:
+                    told = previous.keys() & set(PROVISIONERS.get(engine.name, _NONE).owned)
+                    if not told and await _settled(docker, engine, runtime):
+                        continue
+                    log.info("%s: its settings changed, bringing it up again", engine.name)
                 await start(engine.name, previous)
             except Exception as exc:
                 failures[engine.name] = _said(exc)

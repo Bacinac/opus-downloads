@@ -117,16 +117,19 @@ async def _link_solver(client: httpx.AsyncClient, host: str) -> None:
         tags=[tag],
         fields=[{**f, "value": host} if f["name"] == "host" else f for f in body["fields"]],
     )
-    resp = await common.await_accepted(client, "/api/v1/indexerproxy/test", body)
-    if resp.status_code >= 400:
-        raise ContainerError(f"prowlarr's solver never passed its test: {_refusal(resp)}")
     resp = await client.get("/api/v1/indexerproxy")
     resp.raise_for_status()
     current = next((p for p in resp.json() if p["implementation"] == "FlareSolverr"), None)
+    if current is not None:
+        # tested without its id, the definition reads as a second proxy under a
+        # name already taken, and Prowlarr refuses it as not unique
+        body["id"] = current["id"]
+    resp = await common.await_accepted(client, "/api/v1/indexerproxy/test", body)
+    if resp.status_code >= 400:
+        raise ContainerError(f"prowlarr's solver never passed its test: {_refusal(resp)}")
     if current is None:
         resp = await client.post("/api/v1/indexerproxy", json=body)
     else:
-        body["id"] = current["id"]
         resp = await client.put(f"/api/v1/indexerproxy/{current['id']}", json=body)
     if resp.status_code >= 400:
         raise ContainerError(f"prowlarr would not take its solver: {_refusal(resp)}")

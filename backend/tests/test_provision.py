@@ -209,6 +209,9 @@ class FakeProwlarr:
                 "fields": [{"name": "host", "value": "http://localhost:8191/"},
                            {"name": "requestTimeout", "value": 60}],
             }])
+        if request.method == "POST" and rest in ("/api/v1/indexerproxy/test", "/api/v1/indexerproxy"):
+            if any(p["name"] == sent["name"] and p["id"] != sent.get("id") for p in self.proxies):
+                return httpx.Response(400, json=[{"errorMessage": "Should be unique"}])
         if rest == "/api/v1/indexerproxy/test":
             if self.solver_warming:
                 self.solver_warming -= 1
@@ -428,6 +431,15 @@ async def test_a_bundled_engine_whose_container_is_gone_is_brought_back(bundled,
     monkeypatch.setattr(provision, "Docker", LostDocker)
     await applied({})
     assert bundled["started"] == ["sabnzbd"]
+
+
+async def test_a_restart_of_opus_starts_every_bundled_engine_again(bundled, monkeypatch):
+    monkeypatch.setattr(provision, "build_engines", lambda runtime: [
+        FakeEngine("prowlarr"), FakeEngine("sabnzbd"), FakeEngine("slskd")])
+    provision.reconcile()
+    while provision._applies:
+        await asyncio.sleep(0.01)
+    assert bundled["started"] == ["sabnzbd", "slskd", "prowlarr"]
 
 
 @pytest.mark.parametrize("name", sorted(n for n, s in SPEC_BY_NAME.items() if s.image))

@@ -26,8 +26,7 @@ async def lifespan(app: FastAPI):
     # an in-process download lived in the memory of the process that just ended;
     # say so before answering anything about it
     await runner.recover()
-    # a definition this release changed is applied like a saved setting is
-    provision.apply_saved({})
+    provision.reconcile()
     yield
 
 
