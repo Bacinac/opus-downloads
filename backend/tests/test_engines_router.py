@@ -125,3 +125,15 @@ def test_bundled_ui_capability_keeps_engine_pages_on_their_own_origin(name, embe
     answer = engine_to_dict(engine, EngineHealth(True, "ready"))
     assert answer["ui_embeddable"] is embeddable
     assert answer["ui_url"] == f"{settings.engines_url}/api/engines/{name}/ui/"
+
+
+@pytest.mark.parametrize(("prowlarr", "proxy"), [
+    ({"prowlarr_mode": "bundled", "prowlarr_use_vpn": "true"}, "http://opus_vpn_prowlarr:8888"),
+    ({"prowlarr_mode": "bundled", "prowlarr_use_vpn": "false"}, ""),
+    ({"prowlarr_mode": "external", "prowlarr_use_vpn": "true"}, ""),
+])
+def test_a_grabber_follows_links_out_of_the_searchers_tunnel_only_when_it_has_one(prowlarr, proxy):
+    from opus.engines.registry import build_engine
+
+    runtime = RuntimeConfig({**prowlarr, "sabnzbd_mode": "bundled"})
+    assert build_engine(runtime, "sabnzbd").config.indexer_proxy == proxy

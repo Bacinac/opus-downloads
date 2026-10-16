@@ -130,6 +130,9 @@ credential provider, and settings return secrets write-only. The
 installation. A bundled engine that uses it starts inside its own VPN network
 namespace (gluetun). qBittorrent and slskd default to on because they expose
 you to a peer swarm; Usenet does not, so SABnzbd and Prowlarr default to off.
+Prowlarr's tunnel also opens gluetun's HTTP proxy: the NZB or .torrent a
+result leads to is fetched by Downloads through it, so the indexer sees the
+fetch come from the same address as the search.
 
 ## Deployment
 

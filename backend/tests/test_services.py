@@ -386,3 +386,111 @@ async def test_an_engine_that_answers_with_a_page_is_an_engine_error(route):
                  f"{settings.landing_root}/usenet")
     with pytest.raises(EngineError, match="not JSON"):
         await eng.probe()
+
+
+TUNNEL = "http://opus_vpn_prowlarr:8888"
+SEARCHER = "http://opus_vpn_prowlarr:9696/prowlarr"
+NZB = (b'<?xml version="1.0"?><nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">'
+       b'<file subject="&quot;a.flac&quot; yEnc (1/1)"/></nzb>')
+
+
+@pytest.fixture
+def wire(monkeypatch):
+    """`route`, with the handler told which way out each request took."""
+    real = httpx.AsyncClient
+
+    def install(handler):
+        def client(*args, **kwargs):
+            proxy = kwargs.pop("proxy", None)
+            kwargs["transport"] = httpx.MockTransport(lambda request: handler(request, proxy))
+            return real(*args, **kwargs)
+        monkeypatch.setattr(httpx, "AsyncClient", client)
+    return install
+
+
+def tunnelled(kind, name, url, proxy=TUNNEL):
+    return kind(SPEC_BY_NAME[name], EngineConfig(
+        name=name, mode="bundled", enabled_flag=True, url=url,
+        landing_dir=settings.landing_root, indexer_proxy=proxy), Creds())
+
+
+def searcher_redirecting_to(location, body):
+    def answer(request):
+        if request.url.host == "opus_vpn_prowlarr":
+            return httpx.Response(301, headers={"location": location})
+        return httpx.Response(200, content=body)
+    return answer
+
+
+async def test_the_hop_to_the_indexer_leaves_through_the_searchers_tunnel(wire):
+    torrent = qbittorrent._bencode({b"info": {b"name": b"x", b"length": 1}})
+    indexer = searcher_redirecting_to("https://indexer.example/dl/1.torrent", torrent)
+    seen = []
+
+    def handler(request, proxy):
+        seen.append((request.url.host, proxy))
+        if request.url.host != "qbt":
+            return indexer(request)
+        if request.url.path == "/api/v2/app/preferences":
+            return httpx.Response(200, json={"save_path": "/downloads"})
+        return httpx.Response(200, text="Ok.")
+    wire(handler)
+    eng = tunnelled(qbittorrent.QbittorrentEngine, "qbittorrent", "http://qbt:8090")
+    await eng.grab({"engine": "qbittorrent", "title": "t",
+                    "torrent_url": f"{SEARCHER}/3/download?link=a"}, "video")
+    assert ("opus_vpn_prowlarr", None) in seen
+    assert ("indexer.example", TUNNEL) in seen
+    assert {proxy for host, proxy in seen if host == "qbt"} == {None}
+
+
+async def test_without_a_tunnel_the_indexer_is_reached_directly(wire):
+    seen = []
+
+    def handler(request, proxy):
+        seen.append(proxy)
+        return searcher_redirecting_to("https://usenet.example/get", NZB)(request)
+    wire(handler)
+    eng = tunnelled(sabnzbd.SabnzbdEngine, "sabnzbd", "http://sab:8080", proxy="")
+    contents = await eng.inspect({"nzb_url": f"{SEARCHER}/4/download?link=b"})
+    assert contents.available and set(seen) == {None}
+
+
+def sab_taking_files(wire, indexer):
+    seen, added = [], []
+
+    def handler(request, proxy):
+        seen.append((request.url.host, proxy))
+        if request.url.host != "sab":
+            return indexer(request)
+        mode = request.url.params.get("mode")
+        if mode == "get_config":
+            return httpx.Response(200, json={"config": {"categories": [
+                {"name": "music", "dir": "music"}]}})
+        if mode == "addfile":
+            added.append(request)
+            return httpx.Response(200, json={"status": True, "nzo_ids": ["n1"]})
+        return httpx.Response(400)
+    wire(handler)
+    return tunnelled(sabnzbd.SabnzbdEngine, "sabnzbd", "http://sab:8080"), seen, added
+
+
+async def test_sabnzbd_is_handed_the_nzb_the_tunnel_fetched(wire):
+    eng, seen, added = sab_taking_files(
+        wire, searcher_redirecting_to("https://usenet.example/api?t=get&apikey=hunter2", NZB))
+    job = await eng.grab({"engine": "sabnzbd", "title": "Album",
+                          "nzb_url": f"{SEARCHER}/4/download?link=b"}, "music")
+    assert job["nzo_id"] == "n1"
+    assert ("usenet.example", TUNNEL) in seen
+    assert added[0].method == "POST" and NZB in added[0].content
+    assert added[0].url.params["nzbname"] == "Album"
+
+
+async def test_an_nzb_the_tunnel_cannot_fetch_fails_the_grab_without_its_key(wire):
+    eng, _, added = sab_taking_files(wire, lambda request: httpx.Response(
+        502 if request.url.host == "usenet.example"
+        else 301, headers={"location": "https://usenet.example/api?t=get&apikey=hunter2"}))
+    with pytest.raises(EngineError, match="could not be read") as refused:
+        await eng.grab({"engine": "sabnzbd", "title": "Album",
+                        "nzb_url": f"{SEARCHER}/4/download?link=b&apikey=hunter2"}, "music")
+    assert "hunter2" not in str(refused.value)
+    assert not added

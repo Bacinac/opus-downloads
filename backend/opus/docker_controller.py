@@ -28,6 +28,7 @@ from opus.containers import (
     SOLVER_IMAGE,
     container_name,
     solver_name,
+    tunnel_env,
     vpn_name,
 )
 from opus.engines.catalog import SPEC_BY_NAME, VPN_ENV
@@ -137,8 +138,8 @@ def _valid_tunnel(body: dict, host: dict, env: dict[str, str], config: str,
                 "CgroupPermissions": "rwm",
             }]
             and body.get("NetworkingConfig") == {"EndpointsConfig": {settings.engine_network: {}}}
-            and set(env) <= set(VPN_ENV.values()) | {"FIREWALL_INPUT_PORTS"}
-            and env.get("FIREWALL_INPUT_PORTS") == str(spec.service_port))
+            and set(env) <= set(VPN_ENV.values()) | set(tunnel_env(spec))
+            and all(env.get(key) == value for key, value in tunnel_env(spec).items()))
 
 
 def _valid_engine(body: dict, host: dict, env: dict[str, str], config: str,

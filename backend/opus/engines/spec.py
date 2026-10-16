@@ -82,3 +82,8 @@ class EngineSpec:
     # whether a browser runs beside it when bundled, one that answers a site's
     # Cloudflare challenge so the indexers behind one can be searched at all
     solver: bool = False
+    # whether its tunnel, when it runs in one, also lets OPUS out. What a search
+    # result leads to — an NZB always, a .torrent from an indexer set to
+    # redirect — is fetched from the indexer by whoever follows the link, and
+    # it has to come from the address the search did.
+    lends_proxy: bool = False

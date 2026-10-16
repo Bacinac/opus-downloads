@@ -32,6 +32,8 @@ OWNER_LABEL = "biz.boskovic.opus"
 SPEC_LABEL = f"{OWNER_LABEL}.spec"
 SOLVER_IMAGE = "ghcr.io/flaresolverr/flaresolverr:latest"
 SOLVER_PORT = 8191
+# gluetun's own HTTP proxy, on the port it listens on unless told otherwise
+TUNNEL_PROXY_PORT = 8888
 BASE_URL = "http://docker"
 
 
@@ -54,6 +56,23 @@ def vpn_name(engine: str) -> str:
 
 def solver_name(engine: str) -> str:
     return f"opus_solver_{engine}"
+
+
+def tunnel_proxy(spec: EngineSpec) -> str:
+    return f"http://{vpn_name(spec.name)}:{TUNNEL_PROXY_PORT}"
+
+
+def tunnel_env(spec: EngineSpec) -> dict[str, str]:
+    """What a tunnel is set to beyond the VPN account: the ports it lets in.
+
+    gluetun drops inbound traffic to everything except the ports it was told to
+    expect, and an engine inside it has no firewall of its own to argue with —
+    so without this the engine answers nobody, itself included, and says
+    nothing about why. A tunnel that lends its way out opens its proxy too."""
+    if not spec.lends_proxy:
+        return {"FIREWALL_INPUT_PORTS": str(spec.service_port)}
+    return {"FIREWALL_INPUT_PORTS": f"{spec.service_port},{TUNNEL_PROXY_PORT}",
+            "HTTPPROXY": "on"}
 
 
 class Docker:
@@ -218,13 +237,8 @@ def engine_spec(spec: EngineSpec, env: dict[str, str], use_vpn: bool,
 
 def vpn_spec(spec: EngineSpec, env: dict[str, str]) -> dict:
     """The tunnel an engine sits inside. It publishes nothing either: an engine
-    OPUS runs is reached through OPUS, on the network they share.
-
-    gluetun drops inbound traffic to everything except the ports it was told to
-    expect, and an engine inside it has no firewall of its own to argue with —
-    so without this the engine answers nobody, itself included, and says
-    nothing about why."""
-    env = {**env, "FIREWALL_INPUT_PORTS": str(spec.service_port)}
+    OPUS runs is reached through OPUS, on the network they share."""
+    env = {**env, **tunnel_env(spec)}
     return {
         "Image": "qmcgaw/gluetun",
         "Env": [f"{k}={v}" for k, v in sorted(env.items())],

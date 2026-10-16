@@ -12,10 +12,9 @@ whatever the instance is configured with."""
 import base64
 import hashlib
 import re
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, urlparse
 
-import httpx
-
+from opus.engines import release_link
 from opus.engines.base import (
     EngineError,
     EngineHealth,
@@ -91,22 +90,6 @@ def _magnet_hash(magnet: str) -> str | None:
     return None
 
 
-async def _follow(link: str) -> str | bytes:
-    """The magnet or the .torrent an indexer link leads to. Prowlarr hands out its
-    own address for both, and for a magnet that address answers with a redirect
-    to `magnet:` — a scheme no HTTP client follows, so the hops are walked here."""
-    async with httpx.AsyncClient(timeout=60) as fetcher:
-        for _ in range(5):
-            resp = await fetcher.get(link)
-            if not resp.is_redirect:
-                resp.raise_for_status()
-                return resp.content
-            link = urljoin(link, resp.headers["location"])
-            if link.startswith("magnet:"):
-                return link
-    raise EngineError("qbittorrent: the indexer link kept redirecting")
-
-
 class QbittorrentEngine(ServiceEngine, Grabber):
     async def _login(self, client) -> None:
         resp = await client.post("/api/v2/auth/login", data={
@@ -156,7 +139,8 @@ class QbittorrentEngine(ServiceEngine, Grabber):
     async def grab(self, grab_ref: dict, namespace: str) -> dict:
         title = grab_ref.get("title", "")
         link = grab_ref.get("magnet") or grab_ref["torrent_url"]
-        found = link if link.startswith("magnet:") else await _follow(link)
+        found = (link if link.startswith("magnet:")
+                 else await release_link.fetch(link, self.config.indexer_proxy, timeout=60))
         if isinstance(found, str):
             infohash = _magnet_hash(found)
             if not infohash:

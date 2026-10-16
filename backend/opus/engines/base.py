@@ -151,6 +151,9 @@ class EngineConfig:
     public_url: str = ""
     landing_dir: str = ""  # where OPUS sees this engine's finished downloads
     use_vpn: bool = False  # run a bundled instance inside the install's VPN netns
+    # the way out of the searcher's tunnel, for what its results lead to; empty
+    # when the searcher goes out from this host's own address anyway
+    indexer_proxy: str = ""
 
 
 class Engine(abc.ABC):

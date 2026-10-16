@@ -15,6 +15,7 @@ from xml.etree import ElementTree
 
 import httpx
 
+from opus.engines import release_link
 from opus.engines.base import (
     ContentFile,
     Contents,
@@ -81,17 +82,7 @@ def _nzb_files(body: bytes) -> list[ContentFile]:
     return files
 
 
-async def _fetch_nzb(url: str) -> bytes:
-    limits = httpx.Timeout(connect=5, read=10, write=10, pool=5)
-    async with httpx.AsyncClient(timeout=limits, follow_redirects=True) as client:
-        async with client.stream("GET", url) as resp:
-            resp.raise_for_status()
-            body = bytearray()
-            async for chunk in resp.aiter_bytes():
-                body += chunk
-                if len(body) > _NZB_MAX_BYTES:
-                    raise EngineError("the manifest is larger than a manifest should be")
-            return bytes(body)
+_NZB_TIMEOUT = httpx.Timeout(connect=5, read=10, write=10, pool=5)
 
 
 def _eta_seconds(timeleft: str) -> int | None:
@@ -104,10 +95,10 @@ def _eta_seconds(timeleft: str) -> int | None:
 
 
 class SabnzbdEngine(ServiceEngine, Grabber):
-    async def _call(self, client, **params) -> dict:
-        resp = await client.get("/api", params={
-            "apikey": self.secret("api_key"), "output": "json", **params,
-        })
+    async def _call(self, client, files: dict | None = None, **params) -> dict:
+        query = {"apikey": self.secret("api_key"), "output": "json", **params}
+        resp = await (client.post("/api", params=query, files=files) if files
+                      else client.get("/api", params=query))
         resp.raise_for_status()
         data = resp.json()
         if data.get("status") is False:
@@ -176,7 +167,7 @@ class SabnzbdEngine(ServiceEngine, Grabber):
         if not url:
             return Contents(available=False, detail="the release carries no NZB url")
         try:
-            body = await asyncio.wait_for(_fetch_nzb(url), _NZB_BUDGET_SECONDS)
+            body = await self._nzb(url)
         except Exception as exc:
             # not being able to look is not the same as looking and seeing
             # nothing; the caller decides whether to grab blind
@@ -189,12 +180,31 @@ class SabnzbdEngine(ServiceEngine, Grabber):
         return Contents(available=True, files=files,
                         detail=f"{len(files)} files declared")
 
+    async def _nzb(self, url: str) -> bytes:
+        found = await asyncio.wait_for(
+            release_link.fetch(url, self.config.indexer_proxy,
+                               timeout=_NZB_TIMEOUT, limit=_NZB_MAX_BYTES),
+            _NZB_BUDGET_SECONDS)
+        if isinstance(found, str):
+            raise EngineError("the link leads to a magnet, not an NZB")
+        return found
+
     async def grab(self, grab_ref: dict, namespace: str) -> dict:
+        """OPUS fetches the NZB and hands SABnzbd the file: given the link,
+        SABnzbd would follow Prowlarr's redirect to the indexer itself, from
+        its own address rather than the one the search went out from."""
         title = grab_ref.get("title", "")
+        url = grab_ref["nzb_url"]
+        try:
+            nzb = await self._nzb(url)
+        except (httpx.HTTPError, EngineError, TimeoutError) as exc:
+            raise EngineError(
+                redacted(f"{self.name}: the NZB at {url} could not be read: {exc}")) from exc
         async with self.http(60) as client:
             await self._ensure_category(client, namespace)
-            data = await self._call(client, mode="addurl", name=grab_ref["nzb_url"],
-                                    nzbname=title, cat=namespace)
+            data = await self._call(
+                client, files={"name": ("release.nzb", nzb, "application/x-nzb")},
+                mode="addfile", nzbname=title, cat=namespace)
             nzo_ids = data.get("nzo_ids") or []
             if not nzo_ids:
                 raise EngineError(f"{self.name}: NZB accepted but no job id returned")

@@ -28,6 +28,7 @@ BUILT_IN: tuple[EngineSpec, ...] = (
         image="lscr.io/linuxserver/prowlarr:latest",
         service_port=9696,
         solver=True,
+        lends_proxy=True,
     ),
     EngineSpec(
         name="sabnzbd",

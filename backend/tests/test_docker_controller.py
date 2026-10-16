@@ -80,3 +80,13 @@ def test_controller_rejects_a_share_bind_that_escapes_media_with_traversal(monke
     assert not docker_controller._allowed("POST", "containers/create", {"name": "opus_slskd"}, body)
     body["HostConfig"]["Binds"][-1] = f"{settings.media_host_dir}/music:/music:ro"
     assert docker_controller._allowed("POST", "containers/create", {"name": "opus_slskd"}, body)
+
+
+def test_only_the_searchers_tunnel_opens_a_proxy():
+    create = ("POST", "containers/create")
+    lent = containers.vpn_spec(docker_controller.SPEC_BY_NAME["prowlarr"], {})
+    assert "HTTPPROXY=on" in lent["Env"]
+    assert docker_controller._allowed(*create, {"name": "opus_vpn_prowlarr"}, lent)
+    kept = containers.vpn_spec(docker_controller.SPEC_BY_NAME["qbittorrent"], {})
+    widened = {**kept, "Env": [*kept["Env"], "HTTPPROXY=on"]}
+    assert not docker_controller._allowed(*create, {"name": "opus_vpn_qbittorrent"}, widened)

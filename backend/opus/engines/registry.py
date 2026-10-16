@@ -5,7 +5,7 @@ into live Engine adapters. One place maps a catalog name to its adapter class;
 from opus_core import plugins
 
 from opus.config import settings
-from opus.containers import bundled_url
+from opus.containers import bundled_url, tunnel_proxy
 from opus.credentials import GlobalCredentialProvider
 from opus.engines.base import Engine, EngineConfig
 from opus.engines.catalog import CATALOG, SPEC_BY_NAME
@@ -43,6 +43,16 @@ def adapter(name: str) -> type[Engine]:
     return REGISTRY[name] if name in REGISTRY else plugins.resolve(PLUGGED[name])
 
 
+def _indexer_proxy(runtime: RuntimeConfig) -> str:
+    """An adopted searcher's way out is its owner's business and out of sight;
+    a bundled one in a tunnel lends it."""
+    for spec in CATALOG:
+        if (spec.lends_proxy and runtime.get(f"{spec.name}_mode") == "bundled"
+                and runtime.bool(f"{spec.name}_use_vpn")):
+            return tunnel_proxy(spec)
+    return ""
+
+
 def _engine_config(runtime: RuntimeConfig, spec: EngineSpec) -> EngineConfig:
     landing_dir = runtime.get(f"{spec.name}_landing_dir") if spec.paths else ""
     if spec.swappable:
@@ -66,6 +76,7 @@ def _engine_config(runtime: RuntimeConfig, spec: EngineSpec) -> EngineConfig:
             public_url="" if mode == "bundled" else runtime.get(f"{spec.name}_public_url"),
             landing_dir=landing_dir,
             use_vpn=use_vpn,
+            indexer_proxy=_indexer_proxy(runtime),
         )
     return EngineConfig(
         name=spec.name,
