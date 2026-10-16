@@ -602,3 +602,35 @@ def test_a_share_outside_the_media_directory_is_never_bound(monkeypatch):
     definition = provision._definition(SLSKD, RuntimeConfig({"slskd_share_dir": "/mnt/media/music"}),
                                        False)
     assert "/mnt/media/music:/music:ro" in definition["HostConfig"]["Binds"]
+
+
+async def test_a_replaced_tunnel_rebuilds_its_engine_without_asking_after_a_solver_it_never_had(monkeypatch):
+    asked, ensured = [], []
+
+    class Docker:
+        async def inspect(self, name):
+            asked.append(name)
+            return {"Config": {"Labels": {OWNER_LABEL: "engine"}}}
+
+        async def stop(self, name):
+            pass
+
+        async def remove(self, name):
+            pass
+
+    async def seed(docker, spec, runtime):
+        return False
+
+    async def ensure(docker, name, definition):
+        ensured.append(name)
+        return True
+
+    async def describe(docker, spec, use_vpn):
+        return {}
+    monkeypatch.setattr(provision, "_seed", seed)
+    monkeypatch.setattr(provision.tunnel, "seed", lambda spec: None)
+    monkeypatch.setattr(provision, "ensure", ensure)
+    monkeypatch.setattr(provision, "describe", describe)
+    await provision.bring_up(Docker(), SLSKD, RuntimeConfig({}), True)
+    assert "opus_solver_slskd" not in asked
+    assert ensured == ["opus_vpn_slskd", "opus_slskd"]

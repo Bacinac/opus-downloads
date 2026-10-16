@@ -121,7 +121,8 @@ async def bring_up(docker: Docker, spec: EngineSpec, runtime: RuntimeConfig,
         # built again against the new one.
         log.info("%s: its tunnel was replaced, so it is too", spec.name)
         await teardown(docker, container_name(spec.name))
-        await teardown(docker, solver_name(spec.name))
+        if spec.solver:
+            await teardown(docker, solver_name(spec.name))
     if spec.solver:
         await ensure(docker, solver_name(spec.name), solver_spec(spec, use_vpn))
     created = await ensure(docker, container_name(spec.name), _definition(spec, runtime, use_vpn))
@@ -138,7 +139,8 @@ async def take_down(docker: Docker, spec: EngineSpec, use_vpn: bool) -> dict:
     network for as long as it takes to notice."""
     async with _lock(spec.name):
         await teardown(docker, container_name(spec.name))
-        await teardown(docker, solver_name(spec.name))
+        if spec.solver:
+            await teardown(docker, solver_name(spec.name))
         await teardown(docker, vpn_name(spec.name))
         failures.pop(spec.name, None)
         return await describe(docker, spec, use_vpn)
