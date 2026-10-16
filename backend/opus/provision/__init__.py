@@ -47,6 +47,11 @@ from opus.settings_store import RuntimeConfig, current_runtime, store_credential
 
 log = logging.getLogger(__name__)
 
+
+def _said(exc: Exception) -> str:
+    # a timeout or a dropped connection carries no message of its own
+    return redacted(str(exc) or type(exc).__name__)
+
 CONTENT = f"{CONTENT_GROUP}_folders"
 
 
@@ -172,7 +177,7 @@ async def retire(previous: dict[str, str]) -> None:
         try:
             await take_down(docker, engine.spec, engine.config.use_vpn)
         except Exception as exc:
-            failures[engine.name] = redacted(str(exc))
+            failures[engine.name] = _said(exc)
             log.warning("%s: its bundled container could not be taken down: %s",
                         engine.name, failures[engine.name])
 
@@ -229,7 +234,7 @@ async def ensure_content(engine: Engine, runtime: RuntimeConfig) -> list[str]:
     except Exception as exc:
         # an engine that cannot hold categories, or one still coming up, must
         # not fail the start — the folders exist in the landing zone either way
-        log.warning("%s: could not set its folders: %s", engine.name, redacted(str(exc)))
+        log.warning("%s: could not set its folders: %s", engine.name, _said(exc))
     return folders
 
 
@@ -257,7 +262,7 @@ async def start(name: str, previous: dict[str, str] | None = None) -> dict:
         try:
             result = await _start(name, previous or {})
         except Exception as exc:
-            failures[name] = redacted(str(exc))
+            failures[name] = _said(exc)
             raise
         failures.pop(name, None)
         return result
@@ -358,6 +363,6 @@ async def _apply(previous: dict[str, str]) -> None:
                 log.info("%s: its settings changed, bringing it up again", engine.name)
                 await start(engine.name, previous)
             except Exception as exc:
-                failures[engine.name] = redacted(str(exc))
+                failures[engine.name] = _said(exc)
                 log.warning("%s: could not be brought up after the change: %s",
                             engine.name, failures[engine.name])

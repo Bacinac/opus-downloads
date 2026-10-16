@@ -31,6 +31,8 @@ API_VERSION = "v1.44"
 OWNER_LABEL = "biz.boskovic.opus"
 SPEC_LABEL = f"{OWNER_LABEL}.spec"
 SOLVER_IMAGE = "ghcr.io/flaresolverr/flaresolverr:latest"
+# gluetun's release line; its :latest is built from every commit to master
+TUNNEL_IMAGE = "qmcgaw/gluetun:v3"
 SOLVER_PORT = 8191
 # gluetun's own HTTP proxy, on the port it listens on unless told otherwise
 TUNNEL_PROXY_PORT = 8888
@@ -56,6 +58,11 @@ def vpn_name(engine: str) -> str:
 
 def solver_name(engine: str) -> str:
     return f"opus_solver_{engine}"
+
+
+def tagged(image: str) -> bool:
+    name = image.rsplit("/", 1)[-1]
+    return "@" in name or ":" in name
 
 
 def tunnel_proxy(spec: EngineSpec) -> str:
@@ -149,7 +156,12 @@ class Docker:
     async def pull(self, image: str) -> None:
         """The daemon answers a pull with 200 before it has fetched anything and
         reports a registry failure inside the stream, so the stream is read to
-        its end and the image is then asked for."""
+        its end and the image is then asked for.
+
+        An image named without a tag is refused: the daemon reads that as every
+        tag the repository has, and pulls them all."""
+        if not tagged(image):
+            raise ContainerError(f"{image} names no tag; pulling it would fetch every tag it has")
         async with self._client() as client:
             async with client.stream("POST", "/images/create",
                                      params={"fromImage": image}) as resp:
@@ -240,7 +252,7 @@ def vpn_spec(spec: EngineSpec, env: dict[str, str]) -> dict:
     OPUS runs is reached through OPUS, on the network they share."""
     env = {**env, **tunnel_env(spec)}
     return {
-        "Image": "qmcgaw/gluetun",
+        "Image": TUNNEL_IMAGE,
         "Env": [f"{k}={v}" for k, v in sorted(env.items())],
         "Labels": {OWNER_LABEL: "engine", f"{OWNER_LABEL}.name": f"vpn-{spec.name}"},
         "NetworkingConfig": {"EndpointsConfig": {settings.engine_network: {}}},

@@ -90,3 +90,23 @@ def test_only_the_searchers_tunnel_opens_a_proxy():
     kept = containers.vpn_spec(docker_controller.SPEC_BY_NAME["qbittorrent"], {})
     widened = {**kept, "Env": [*kept["Env"], "HTTPPROXY=on"]}
     assert not docker_controller._allowed(*create, {"name": "opus_vpn_qbittorrent"}, widened)
+
+
+def test_every_image_the_controller_lets_through_names_its_tag():
+    assert all(containers.tagged(image) for image in docker_controller._IMAGES)
+
+
+@pytest.mark.parametrize(("image", "tagged"), [
+    ("qmcgaw/gluetun", False),
+    ("qmcgaw/gluetun:v3", True),
+    ("registry.local:5000/gluetun", False),
+    ("registry.local:5000/gluetun:v3", True),
+    ("qmcgaw/gluetun@sha256:abc", True),
+])
+def test_an_image_without_a_tag_is_told_apart(image, tagged):
+    assert containers.tagged(image) is tagged
+
+
+async def test_an_untagged_pull_is_refused_before_the_daemon_is_asked():
+    with pytest.raises(containers.ContainerError, match="every tag"):
+        await containers.Docker(socket_path="/nonexistent").pull("qmcgaw/gluetun")

@@ -26,6 +26,7 @@ from opus.containers import (
     API_VERSION,
     OWNER_LABEL,
     SOLVER_IMAGE,
+    TUNNEL_IMAGE,
     container_name,
     solver_name,
     tunnel_env,
@@ -45,7 +46,7 @@ _ROLES = {
 }
 _NAMES = frozenset(_ROLES)
 _IMAGES = frozenset(
-    [spec.image for spec in SPEC_BY_NAME.values() if spec.image] + ["qmcgaw/gluetun", SOLVER_IMAGE]
+    [spec.image for spec in SPEC_BY_NAME.values() if spec.image] + [TUNNEL_IMAGE, SOLVER_IMAGE]
 )
 
 
@@ -129,7 +130,7 @@ def _valid_host(host: dict, tunnel: bool) -> bool:
 
 def _valid_tunnel(body: dict, host: dict, env: dict[str, str], config: str,
                   spec: EngineSpec) -> bool:
-    return (body.get("Image") == "qmcgaw/gluetun"
+    return (body.get("Image") == TUNNEL_IMAGE
             and host.get("Binds") == [f"{config}/tunnel:/gluetun/auth"]
             and host.get("CapAdd") == ["NET_ADMIN"] and host.get("NetworkMode") is None
             and host.get("Tmpfs") is None
