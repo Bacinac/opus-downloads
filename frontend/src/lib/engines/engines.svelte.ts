@@ -1,8 +1,8 @@
 // Every engine and its state, held once: the layout and the pages under it show
 // the same list, and every load of it probes every engine.
 
-import { request } from '$lib/kit';
-import type { EngineInfo } from '$lib/core/types';
+import { request } from '#lib/kit/index.js';
+import type { EngineInfo } from '#lib/core/types.js';
 
 class EngineStore {
 	list = $state<EngineInfo[]>([]);

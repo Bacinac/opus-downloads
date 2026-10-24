@@ -5,10 +5,10 @@
 	// badge and hint say why. The health detail is a backend diagnostic surfaced
 	// as a tooltip, not translated copy.
 
-	import { t, type MessageKey } from '$lib/i18n';
-	import { Button, Card, Notice, SettingField, Tag, request } from '$lib/kit';
-	import AccountLink from '$lib/engines/AccountLink.svelte';
-	import type { EngineInfo, Setting } from '$lib/core/types';
+	import { t, type MessageKey } from '#lib/i18n/index.js';
+	import { Button, Card, Notice, SettingField, Tag, request } from '#lib/kit/index.js';
+	import AccountLink from '#lib/engines/AccountLink.svelte';
+	import type { EngineInfo, Setting } from '#lib/core/types.js';
 
 	let {
 		engine,

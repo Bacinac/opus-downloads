@@ -1,11 +1,11 @@
 <script lang="ts">
 	import '../app.css';
 	import { page } from '$app/state';
-	import { Toasts, onUnauthorized } from '$lib/kit';
-	import { Login, Shell, icons, me, type Alert } from '$lib/opus';
-	import { t, type MessageKey } from '$lib/i18n';
-	import { MODULES, MODULE } from '$lib/core/modules';
-	import { engines } from '$lib/engines/engines.svelte';
+	import { Toasts, onUnauthorized } from '#lib/kit/index.js';
+	import { Login, Shell, icons, me, type Alert } from '#lib/opus/index.js';
+	import { t, type MessageKey } from '#lib/i18n/index.js';
+	import { MODULES, MODULE } from '#lib/core/modules.js';
+	import { engines } from '#lib/engines/engines.svelte.js';
 
 	let { children } = $props();
 	const demo = import.meta.env.VITE_OPUS_DEMO === '1';

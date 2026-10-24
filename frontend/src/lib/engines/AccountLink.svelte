@@ -4,8 +4,8 @@
 	// of a field. Ask for a link, the user approves it on the service's own site,
 	// and the answer arrives on a later poll.
 
-	import { t } from '$lib/i18n';
-	import { ArmedButton, Button, Notice, Tag, request } from '$lib/kit';
+	import { t } from '#lib/i18n/index.js';
+	import { ArmedButton, Button, Notice, Tag, request } from '#lib/kit/index.js';
 
 	let { engine, onchanged }: { engine: string; onchanged: () => void } = $props();
 

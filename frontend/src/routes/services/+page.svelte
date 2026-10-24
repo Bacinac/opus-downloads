@@ -4,9 +4,9 @@
 	// — an engine running inside OPUS has nothing to open, so a tab of its own
 	// would be a door onto a sentence.
 
-	import { t, type MessageKey } from '$lib/i18n';
-	import { Notice, Tabs, Tag, type Tab } from '$lib/kit';
-	import { engines } from '$lib/engines/engines.svelte';
+	import { t, type MessageKey } from '#lib/i18n/index.js';
+	import { Notice, Tabs, Tag, type Tab } from '#lib/kit/index.js';
+	import { engines } from '#lib/engines/engines.svelte.js';
 
 	const INSIDE = '#inside';
 	const ADOPTED = '#adopted';

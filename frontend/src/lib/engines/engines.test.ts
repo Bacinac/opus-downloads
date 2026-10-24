@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import type { EngineInfo } from '$lib/core/types';
+import type { EngineInfo } from '#lib/core/types.js';
 
 const answers = vi.hoisted(() => [] as ((list: unknown) => void)[]);
-vi.mock('$lib/kit', () => ({
+vi.mock('#lib/kit/index.js', () => ({
 	request: vi.fn(() => new Promise((answer) => answers.push(answer)))
 }));
 
-import { request } from '$lib/kit';
+import { request } from '#lib/kit/index.js';
 import { engines } from './engines.svelte';
 
 const said = (name: string) => [{ name }] as unknown as EngineInfo[];

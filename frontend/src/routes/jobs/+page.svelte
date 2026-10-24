@@ -3,7 +3,7 @@
 	// elsewhere appears; each unfinished job is then refreshed through /jobs/{id},
 	// which is what actually asks the owning engine.
 
-	import { t, type MessageKey } from '$lib/i18n';
+	import { t, type MessageKey } from '#lib/i18n/index.js';
 	import {
 		ArmedButton,
 		Notice,
@@ -15,9 +15,9 @@
 		request,
 		toasts,
 		type TagTone
-	} from '$lib/kit';
-	import { isActive, isStale, merged } from '$lib/core/jobs';
-	import type { Job, JobEvent } from '$lib/core/types';
+	} from '#lib/kit/index.js';
+	import { isActive, isStale, merged } from '#lib/core/jobs.js';
+	import type { Job, JobEvent } from '#lib/core/types.js';
 
 	const POLL_MS = 4000;
 

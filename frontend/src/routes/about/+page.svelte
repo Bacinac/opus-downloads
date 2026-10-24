@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { About } from '$lib/opus';
-	import { t } from '$lib/i18n';
-	import { MODULE } from '$lib/core/modules';
+	import { About } from '#lib/opus/index.js';
+	import { t } from '#lib/i18n/index.js';
+	import { MODULE } from '#lib/core/modules.js';
 </script>
 
 <About

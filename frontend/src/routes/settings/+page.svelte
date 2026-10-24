@@ -3,11 +3,11 @@
 	// live availability and its editable config, over the one draft the page
 	// saves.
 
-	import { t } from '$lib/i18n';
-	import { Card, SaveBar, SettingField, SettingsDraft } from '$lib/kit';
-	import EngineCard from '$lib/engines/EngineCard.svelte';
-	import { engines } from '$lib/engines/engines.svelte';
-	import type { Setting } from '$lib/core/types';
+	import { t } from '#lib/i18n/index.js';
+	import { Card, SaveBar, SettingField, SettingsDraft } from '#lib/kit/index.js';
+	import EngineCard from '#lib/engines/EngineCard.svelte';
+	import { engines } from '#lib/engines/engines.svelte.js';
+	import type { Setting } from '#lib/core/types.js';
 
 	const form = new SettingsDraft<Setting>();
 

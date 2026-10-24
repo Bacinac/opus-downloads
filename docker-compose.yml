@@ -182,7 +182,6 @@ services:
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/static:/app/static
-      - ./frontend/svelte.config.js:/app/svelte.config.js
       - ./frontend/vite.config.ts:/app/vite.config.ts
       - ./frontend/tsconfig.json:/app/tsconfig.json
     ports:

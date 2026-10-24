@@ -1,4 +1,4 @@
-import { moduleName, modulesFor } from '$lib/opus';
+import { moduleName, modulesFor } from '#lib/opus/index.js';
 
 export const MODULE = moduleName('downloads');
 

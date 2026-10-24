@@ -4,7 +4,7 @@
 	// engines returned. Grabbing one posts its grab_ref straight back — the ref
 	// names its own engine.
 
-	import { t, type MessageKey } from '$lib/i18n';
+	import { t, type MessageKey } from '#lib/i18n/index.js';
 	import {
 		Button,
 		Notice,
@@ -18,9 +18,9 @@
 		plural,
 		request,
 		toasts
-	} from '$lib/kit';
-	import { engines } from '$lib/engines/engines.svelte';
-	import type { Release, SearchFailure, SearchResponse } from '$lib/core/types';
+	} from '#lib/kit/index.js';
+	import { engines } from '#lib/engines/engines.svelte.js';
+	import type { Release, SearchFailure, SearchResponse } from '#lib/core/types.js';
 
 	const TYPES = ['any', 'movie', 'tv', 'music'] as const;
 

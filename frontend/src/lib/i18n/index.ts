@@ -1,6 +1,6 @@
 import { hr } from './hr';
 import { en } from './en';
-import { registerModule, type Word } from '$lib/opus';
+import { registerModule, type Word } from '#lib/opus/index.js';
 
 export type MessageKey = keyof typeof hr | Word;
 
