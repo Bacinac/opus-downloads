@@ -93,6 +93,14 @@ issued to Downloads (`OPUS_AUTH_TOKEN`) and the shared session key
 (`OPUS_SESSION_KEY`) in the environment. The interface is on port `5282`, and the bundled engines' own
 interfaces are on `8099`.
 
+A finished first install sends one anonymous request to GitHub for a one-byte
+file of the release, so its download count says how many installs completed;
+nothing about the machine is sent or kept. `OPUS_NO_PING=1 ./install.sh` skips it.
+
+Questions and help with any OPUS module go to
+[Discussions](https://github.com/Bacinac/opus-library/discussions); bugs to the
+module's Issues.
+
 ## Upgrade
 
 ```bash

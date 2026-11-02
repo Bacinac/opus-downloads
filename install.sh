@@ -43,3 +43,4 @@ compose up -d postgres docker-controller backend engine-ui frontend
 opus_wait http://127.0.0.1:8097/api/ready 120 "Downloads API"
 opus_wait http://127.0.0.1:5282/ 60 "Downloads UI"
 echo "OPUS Downloads is ready: http://$HOST:5282"
+opus_install_ping downloads
