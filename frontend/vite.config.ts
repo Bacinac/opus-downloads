@@ -19,6 +19,9 @@ export default defineConfig({
 			...(demo ? {} : { csp })
 		})
 	],
+	// rolldown times every plugin and calls the build slow when JavaScript
+	// plugins take most of it, which the Svelte compiler always does
+	build: { rolldownOptions: { checks: { pluginTimings: false } } },
 	resolve: process.env.VITEST ? { conditions: ['browser'] } : undefined,
 	test: {
 		include: ['src/**/*.test.ts']
