@@ -1,16 +1,16 @@
 # OPUS UI (DIDA pattern). Two shipping shapes off one dependency install:
-#   * dev  — `vite dev` (HMR, source bind-mounted by compose). The dev box opts in.
-#   * prod — a real `vite build` (adapter-node) served by the package's server.mjs,
+#   * development — `vite dev` (HMR, source bind-mounted by compose). The dev box opts in.
+#   * production — a real `vite build` (adapter-node) served by the package's server.mjs,
 #            which also proxies /api → the backend. Nothing bind-mounted matters: the build
 #            is baked in.
-# compose selects the stage via the OPUS_UI_TARGET build arg (default: prod).
+# compose builds the stage OPUS_ROLE names.
 FROM node:24-trixie-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
-# --- dev: Vite dev server, source comes from the compose bind mount ------------
-FROM node:24-trixie-slim AS dev
+# --- development: Vite dev server, source comes from the compose bind mount ------------
+FROM node:24-trixie-slim AS development
 ENV NODE_ENV=development
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -32,8 +32,8 @@ COPY . ./
 # the tsconfig extends what sync generates, and the build reads the tsconfig
 RUN npx svelte-kit sync && npm run build
 
-# --- prod: thin runtime serving the baked build + /api proxy (the package's server.mjs)
-FROM node:24-trixie-slim AS prod
+# --- production: thin runtime serving the baked build + /api proxy (the package's server.mjs)
+FROM node:24-trixie-slim AS production
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules

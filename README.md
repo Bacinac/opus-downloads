@@ -124,8 +124,8 @@ docker compose up -d
 | engine interfaces | 8099 |
 | Postgres 18 | compose network only |
 
-With `OPUS_UI_TARGET=dev` and `OPUS_DEV_RELOAD=1` in `.env`, code changes are
-live without a restart. Migrations are applied by the backend on start; a new
+With `OPUS_ROLE=development` in `.env`, code changes are live without a
+restart. Migrations are applied by the backend on start; a new
 one is
 
 ```bash
